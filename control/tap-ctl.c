@@ -755,56 +755,6 @@ usage:
 }
 
 static void
-tap_cli_major_usage(FILE *stream)
-{
-	fprintf(stream, "usage: major [-h]\n");
-}
-
-static int
-tap_cli_major(int argc, char **argv, td_err *error)
-{
-	int c, chr, major;
-
-	chr = 0;
-	td_err_init_errno(error);
-
-	while ((c = getopt(argc, argv, "bch")) != -1) {
-		switch (c) {
-		case 'b':
-			chr = 0;
-			break;
-		case 'c':
-			chr = 1;
-			break;
-		case '?':
-			goto usage;
-		case 'h':
-			tap_cli_major_usage(stdout);
-			return td_err_set_success(error);
-		default:
-			goto usage;
-		}
-	}
-
-	if (chr)
-		major = -EINVAL;
-	else
-		major = tap_ctl_blk_major();
-
-	if (major < 0) {
-		return td_err_set_errno(error, -major);
-	}
-
-	printf("%d\n", major);
-
-	return td_err_set_success(error);
-
-usage:
-	tap_cli_major_usage(stderr);
-	return td_err_set_errno(error, EINVAL);
-}
-
-static void
 tap_cli_open_usage(FILE *stream)
 {
 	fprintf(stream, "usage: open <-p pid> <-m minor> <-a type:/path/to/file> [-R readonly] "
@@ -975,35 +925,6 @@ usage:
 }
 
 static void
-tap_cli_check_usage(FILE *stream)
-{
-	fprintf(stream, "usage: check\n"
-		"(checks whether environment is suitable for tapdisk2)\n");
-}
-
-static int
-tap_cli_check(int argc, char **argv, td_err *error)
-{
-	int err;
-	const char *msg;
-
-	td_err_init_errno(error);
-
-	if (argc != 1)
-		goto usage;
-
-	err = tap_ctl_check(&msg);
-	printf("%s\n", msg);
-	if (!err)
-		return td_err_set_success(error);
-	return td_err_set_errno(error, err);
-
-usage:
-	tap_cli_check_usage(stderr);
-	return td_err_set_errno(error, EINVAL);
-}
-
-static void
 tap_cli_commit_usage(FILE *stream)
 {
 	fprintf(stream, "usage: commit <-p pid> <-m minor> <-a /path/to/file>\n");
@@ -1162,8 +1083,6 @@ struct command commands[] = {
 	{ .name = "pause",        .func = tap_cli_pause         },
 	{ .name = "unpause",      .func = tap_cli_unpause       },
 	{ .name = "stats",        .func = tap_cli_stats         },
-	{ .name = "major",        .func = tap_cli_major         },
-	{ .name = "check",        .func = tap_cli_check         },
 	{ .name = "commit",       .func = tap_cli_commit        },
 	{ .name = "query",        .func = tap_cli_query_commit_job },
 	{ .name = "cancel",       .func = tap_cli_cancel_commit_job },
@@ -1209,7 +1128,6 @@ int
 main(int argc, char *argv[])
 {
 	char **cargv;
-	const char *msg;
 	struct command *cmd;
 	int cargc, i, cnt, ret;
 	char *path = NULL, *prgname = NULL;
@@ -1242,13 +1160,6 @@ main(int argc, char *argv[])
 	if (!cmd) {
 		EPRINTF("invalid COMMAND %s", argv[1]);
 		help();
-	}
-
-	ret = tap_ctl_check(&msg);
-	if (ret) {
-		printf("%s\n", msg);
-		free(path);
-		return ret;
 	}
 
 	cargv = malloc(sizeof(char *) * cargc);
