@@ -47,7 +47,7 @@
 #include "test-suites.h"
 
 #include "tap-ctl.h"
-#include "blktap2.h"
+#include "blktap.h"
 
 void test_tap_ctl_close_success(void **state)
 {
@@ -55,7 +55,7 @@ void test_tap_ctl_close_success(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct mock_select_params write_select_params;
 	struct mock_select_params read_select_params;
 	struct mock_read_params read_params;
@@ -120,7 +120,7 @@ void test_tap_ctl_force_close_success(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct mock_select_params write_select_params;
 	struct mock_select_params read_select_params;
 	struct mock_read_params read_params;
@@ -185,7 +185,7 @@ void test_tap_ctl_close_connect_fail(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct sockaddr_un saddr;
 
 	memset(&saddr, 0, sizeof(saddr));
@@ -216,7 +216,7 @@ void test_tap_ctl_close_write_error(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct mock_select_params write_select_params;
 	tapdisk_message_t message;
 	struct sockaddr_un saddr;
@@ -261,7 +261,7 @@ void test_tap_ctl_close_read_error(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct mock_select_params write_select_params;
 	struct mock_select_params read_select_params;
 	struct mock_read_params read_params;
@@ -321,7 +321,7 @@ void test_tap_ctl_close_write_select_timeout(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct mock_select_params write_select_params;
 	struct timeval write_timeout;
 	tapdisk_message_t message;
@@ -364,7 +364,7 @@ void test_tap_ctl_close_read_select_timeout(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct mock_select_params write_select_params;
 	struct mock_select_params read_select_params;
 	struct timeval write_timeout;
@@ -423,7 +423,7 @@ void test_tap_ctl_close_error_response(void **state)
 	int test_pid = 1345;
 	int test_minor = 17;
 	int ipc_socket = 7;
-	char *expected_sock_name = "/var/run/blktap-control/ctl1345";
+	char *expected_sock_name = "/run/blktap-control/ctl1345";
 	struct mock_select_params write_select_params;
 	struct mock_select_params read_select_params;
 	struct mock_read_params read_params;
