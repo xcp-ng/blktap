@@ -37,6 +37,7 @@
 #include <cmocka.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 #include <cmocka-compat.h>
 
@@ -240,6 +241,7 @@ __wrap_flock(int fd, int operation)
 {
 	int result;
 	check_expected_int(fd);
+	check_expected_int(operation);
 	result = mock();
 	if (result != 0) {
 		errno = result;
@@ -339,6 +341,23 @@ __wrap_globfree(glob_t *pglob)
 	if (pglob->gl_pathv) {
 		test_free(*(pglob->gl_pathv));
 	}
+}
+
+
+int
+__wrap_stat(const char *pathname, struct stat *statbuf)
+{
+	check_expected_ptr(pathname);
+	int result = mock();
+	printf("__wrap_stat result = %d\n", result);
+	if (result == -1) {
+		printf("__wrap_stat, in error path\n");
+
+		errno = mock();
+		return result;
+	}
+	statbuf = mock_ptr_type(struct stat *);
+	return result;
 }
 
 

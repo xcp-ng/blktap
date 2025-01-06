@@ -636,6 +636,13 @@ tapdisk_control_attach_vbd(struct tapdisk_ctl_conn *conn,
 		goto out;
 	}
 
+	/* Lock the marker file to prevent freeing in use*/
+	err = tapdisk_vbd_lock(vbd);
+	if (err) {
+		ERR(err, "Failed to lock VBD marker file for %d\n", minor);
+		goto fail_vbd;
+	}
+
 	tapdisk_server_add_vbd(vbd);
 
 out:
@@ -649,6 +656,10 @@ out:
 	}
 
 	return td_err_set_errno(error, err);
+
+fail_vbd:
+	free(vbd);
+	goto out;
 }
 
 static int
@@ -674,6 +685,9 @@ tapdisk_control_detach_vbd(struct tapdisk_ctl_conn *conn,
 		err = -EBUSY;
 		goto out;
 	}
+
+	/* Unlock marker file */
+	tapdisk_vbd_unlock(vbd);
 
 	if (list_empty(&vbd->images)) {
 		tapdisk_server_remove_vbd(vbd);
