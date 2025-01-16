@@ -74,9 +74,11 @@ td_xenblkif_bufcache_event(event_id_t id, char mode, void *private)
 {
     struct td_xenblkif *blkif = private;
 
+    pthread_mutex_lock(&blkif->mutex);
     td_xenblkif_bufcache_free(blkif);
 
     td_xenblkif_bufcache_evt_unreg(blkif);
+    pthread_mutex_unlock(&blkif->mutex);
 }
 
 /**
@@ -439,21 +441,26 @@ out:
  * @req the request to complete
  * @error completion status of the request
  * @final controls whether the other end should be notified
+ * @lock must always be true except in this function to control recursion
  */
-void
+static bool
 tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
-		struct td_xenblkif_req* req, int err, const int final)
+		struct td_xenblkif_req* req, int err, const int final,
+		bool lock)
 {
 	int _err;
 	long long *max = NULL, *sum = NULL, *cnt = NULL;
 	static int depth = 0;
 	bool processing_barrier_message;
+	bool blkif_destroyed = false;
 	uint64_t *ticks = NULL;
 
 	ASSERT(blkif);
 	ASSERT(req);
 	ASSERT(depth >= 0);
 
+	if (lock)
+		pthread_mutex_lock(&blkif->mutex);
 	depth++;
 
 	processing_barrier_message =
@@ -555,9 +562,16 @@ tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
 		/*
 		 * If this is the last request, complete the barrier request.
 		 */
-		if (tapdisk_xenblkif_barrier_should_complete(blkif))
-			tapdisk_xenblkif_complete_request(blkif,
-					msg_to_tapreq(blkif->barrier.msg), 0, 1);
+		if (tapdisk_xenblkif_barrier_should_complete(blkif)) {
+			blkif_destroyed = tapdisk_xenblkif_complete_request(blkif,
+					msg_to_tapreq(blkif->barrier.msg), 0, 1, false);
+			/*
+			 * We assert here on "blkif_destroyed == true" because as
+			 * "depth > 1" in the recursive call above, the branch to
+			 * destroy the ring shouldn't be taken.
+			 */
+			ASSERT(!blkif_destroyed);
+		}
 	}
 
 	/*
@@ -568,11 +582,17 @@ tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
 				&& !tapdisk_xenblkif_reqs_pending(blkif))) {
 
 		RING_DEBUG(blkif, "destroying dead ring\n");
+		pthread_mutex_unlock(&blkif->mutex);
 		tapdisk_xenblkif_destroy(blkif);
+		blkif_destroyed = true;
+		lock = false; /* blkif with its mutex were destroyed above so don't try to unlock it */
 	}
 
 out:
 	depth--;
+	if (lock)
+		pthread_mutex_unlock(&blkif->mutex);
+	return blkif_destroyed;
 }
 
 /**
@@ -597,18 +617,20 @@ __tapdisk_xenblkif_request_cb(struct td_vbd_request * const vreq,
     req = container_of(vreq, struct td_xenblkif_req, vreq);
 
     if (error) {
+        pthread_mutex_lock(&blkif->mutex);
         if (likely(!blkif->dead)) {
             blkif->stats.errors.img++;
             blkif->vbd_stats.stats->io_errors++;
         }
+        pthread_mutex_unlock(&blkif->mutex);
     }
 
-    tapdisk_xenblkif_complete_request(blkif, req, error, final);
+    tapdisk_xenblkif_complete_request(blkif, req, error, final, true);
 }
 
 
 static inline int
-tapdisk_xenblkif_parse_request(struct td_xenblkif * const blkif,
+tapdisk_xenblkif_parse_request_locked(struct td_xenblkif * const blkif,
         struct td_xenblkif_req * const req)
 {
     td_vbd_request_t *vreq;
@@ -627,6 +649,7 @@ tapdisk_xenblkif_parse_request(struct td_xenblkif * const blkif,
     req->vma = td_xenblkif_bufcache_get(blkif);
     if (unlikely(!req->vma)) {
         err = errno;
+        RING_ERR(blkif, "errno %d: invalid vma\n", err);
         goto out;
     }
 
@@ -743,6 +766,7 @@ tapdisk_xenblkif_make_vbd_request(struct td_xenblkif * const blkif,
 {
     int err = 0;
     td_vbd_request_t *vreq;
+    bool blkif_freed = false;
 
     ASSERT(req);
 
@@ -793,8 +817,10 @@ tapdisk_xenblkif_make_vbd_request(struct td_xenblkif * const blkif,
         goto out;
     }
 
-    if (likely(req->msg.nr_segments))
-        err = tapdisk_xenblkif_parse_request(blkif, req);
+    if (likely(req->msg.nr_segments)) {
+        pthread_mutex_lock(&blkif->mutex);
+        err = tapdisk_xenblkif_parse_request_locked(blkif, req);
+        pthread_mutex_unlock(&blkif->mutex);
     /*
      * If we only got one request from the ring and that was a barrier one,
      * check whether the barrier requests completion conditions are satisfied
@@ -803,10 +829,15 @@ tapdisk_xenblkif_make_vbd_request(struct td_xenblkif * const blkif,
      * It could be that there are more requests in the ring after the barrier
      * request, tapdisk_xenblkif_complete_request() will schedule a ring check.
      */
-    else if (tapdisk_xenblkif_barrier_should_complete(blkif)) {
-        tapdisk_xenblkif_complete_request(blkif,
-                msg_to_tapreq(blkif->barrier.msg), 0, 1);
-        err = 0;
+    } else {
+        pthread_mutex_lock(&blkif->mutex);
+        if (tapdisk_xenblkif_barrier_should_complete(blkif)) {
+            blkif_freed = tapdisk_xenblkif_complete_request(blkif,
+                    msg_to_tapreq(blkif->barrier.msg), 0, 1, false);
+            err = 0;
+        }
+        if (!blkif_freed)
+            pthread_mutex_unlock(&blkif->mutex);
     }
 out:
     return err;
@@ -871,12 +902,13 @@ tapdisk_xenblkif_queue_requests(struct td_xenblkif * const blkif,
     int i;
     int err;
     int nr_errors = 0;
+    bool blkif_freed = false;
 
     ASSERT(blkif);
     ASSERT(reqs);
     ASSERT(nr_reqs >= 0);
 
-    for (i = 0; i < nr_reqs; i++) { /* for each request in the ring... */
+    for (i = 0; i < nr_reqs && !blkif_freed; i++) { /* for each request in the ring... */
         blkif_request_t *msg = reqs[i];
         struct td_xenblkif_req *req;
 
@@ -890,7 +922,7 @@ tapdisk_xenblkif_queue_requests(struct td_xenblkif * const blkif,
         if (err) {
             /* TODO log error */
             nr_errors++;
-            tapdisk_xenblkif_complete_request(blkif, req, err, 1);
+            blkif_freed = tapdisk_xenblkif_complete_request(blkif, req, err, 1, true);
         }
     }
 
@@ -898,8 +930,11 @@ tapdisk_xenblkif_queue_requests(struct td_xenblkif * const blkif,
        dead and current request is the last one, hence adding 
        this check to avoid seg fault */
 
-    if (nr_errors && blkif)
+    if (nr_errors && !blkif_freed) {
+        pthread_mutex_lock(&blkif->mutex);
         xenio_blkif_put_response(blkif, NULL, 0, 1);
+        pthread_mutex_unlock(&blkif->mutex);
+    }
 }
 
 void
@@ -919,6 +954,7 @@ tapdisk_xenblkif_reqs_free(struct td_xenblkif * const blkif)
     free(blkif->reqs_free);
     blkif->reqs_free = NULL;
 
+    pthread_mutex_destroy(&blkif->mutex);
 }
 
 int
@@ -929,6 +965,8 @@ tapdisk_xenblkif_reqs_init(struct td_xenblkif *td_blkif)
     int err = 0;
 
     ASSERT(td_blkif);
+
+    pthread_mutex_init(&td_blkif->mutex, NULL);
 
     td_blkif->ring_size = td_blkif_ring_size(td_blkif);
     ASSERT(td_blkif->ring_size > 0);
