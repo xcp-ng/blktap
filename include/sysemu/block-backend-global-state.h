@@ -79,7 +79,7 @@ void blk_set_dev_ops(BlockBackend *blk, const BlockDevOps *ops, void *opaque);
 void blk_activate(BlockBackend *blk, Error **errp);
 
 int blk_make_zero(BlockBackend *blk, BdrvRequestFlags flags);
-void blk_aio_cancel(BlockAIOCB *acb);
+//void blk_aio_cancel(BlockAIOCB *acb);
 int blk_commit_all(void);
 bool blk_in_drain(BlockBackend *blk);
 void blk_drain(BlockBackend *blk);
@@ -117,7 +117,7 @@ int blk_load_vmstate(BlockBackend *blk, uint8_t *buf, int64_t pos, int size);
 int blk_probe_blocksizes(BlockBackend *blk, BlockSizes *bsz);
 int blk_probe_geometry(BlockBackend *blk, HDGeometry *geo);
 
-void blk_set_io_limits(BlockBackend *blk, ThrottleConfig *cfg);
+//void blk_set_io_limits(BlockBackend *blk, ThrottleConfig *cfg);
 void blk_io_limits_disable(BlockBackend *blk);
 void blk_io_limits_enable(BlockBackend *blk, const char *group);
 void blk_io_limits_update_group(BlockBackend *blk, const char *group);
