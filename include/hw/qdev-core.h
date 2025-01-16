@@ -7,8 +7,8 @@
 #include "qemu/rcu.h"
 #include "qemu/rcu_queue.h"
 #include "qom/object.h"
-#include "hw/hotplug.h"
-#include "hw/resettable.h"
+//#include "hw/hotplug.h"
+//#include "hw/resettable.h"
 
 /**
  * DOC: The QEMU Device API
@@ -278,10 +278,12 @@ struct DeviceState {
      * needed for migration
      */
     int alias_required_for_version;
+#if 0
     /**
      * @reset: ResettableState for the device; handled by Resettable interface.
      */
     ResettableState reset;
+#endif
     /**
      * @unplug_blockers: list of reasons to block unplugging of device
      */
@@ -376,7 +378,9 @@ struct BusState {
     /* public: */
     DeviceState *parent;
     char *name;
+#if 0
     HotplugHandler *hotplug_handler;
+#endif
     int max_index;
     bool realized;
     bool full;
@@ -391,10 +395,12 @@ struct BusState {
      * @sibling: next bus
      */
     BusStateEntry sibling;
+#if 0
     /**
      * @reset: ResettableState for the bus; handled by Resettable interface.
      */
     ResettableState reset;
+#endif
 };
 
 /**
@@ -531,8 +537,10 @@ bool qdev_realize_and_unref(DeviceState *dev, BusState *bus, Error **errp);
 void qdev_unrealize(DeviceState *dev);
 void qdev_set_legacy_instance_id(DeviceState *dev, int alias_id,
                                  int required_for_version);
+#if 0
 HotplugHandler *qdev_get_bus_hotplug_handler(DeviceState *dev);
 HotplugHandler *qdev_get_machine_hotplug_handler(DeviceState *dev);
+#endif
 bool qdev_hotplug_allowed(DeviceState *dev, Error **errp);
 
 /**
@@ -545,10 +553,12 @@ bool qdev_hotplug_allowed(DeviceState *dev, Error **errp);
  * Return: pointer to object that implements TYPE_HOTPLUG_HANDLER interface
  * or NULL if there aren't any.
  */
+#if 0
 HotplugHandler *qdev_get_hotplug_handler(DeviceState *dev);
 void qdev_unplug(DeviceState *dev, Error **errp);
 void qdev_simple_device_unplug_cb(HotplugHandler *hotplug_dev,
                                   DeviceState *dev, Error **errp);
+#endif
 void qdev_machine_creation_done(void);
 bool qdev_machine_modified(void);
 
@@ -1014,6 +1024,7 @@ extern bool qdev_hot_removed;
 
 char *qdev_get_dev_path(DeviceState *dev);
 
+#if 0
 void qbus_set_hotplug_handler(BusState *bus, Object *handler);
 void qbus_set_bus_hotplug_handler(BusState *bus);
 
@@ -1032,6 +1043,7 @@ static inline bool qbus_is_hotpluggable(BusState *bus)
     }
     return ret;
 }
+#endif
 
 /**
  * qbus_mark_full: Mark this bus as full, so no more devices can be attached

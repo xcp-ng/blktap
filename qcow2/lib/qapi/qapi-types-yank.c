@@ -12,8 +12,8 @@
 
 #include "qemu/osdep.h"
 #include "qapi/dealloc-visitor.h"
-#include "qapi-types-yank.h"
-#include "qapi-visit-yank.h"
+#include "qapi/qapi-types-yank.h"
+#include "qapi/qapi-visit-yank.h"
 
 const QEnumLookup YankInstanceType_lookup = {
     .array = (const char *const[]) {

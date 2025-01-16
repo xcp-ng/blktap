@@ -959,6 +959,7 @@ perform_cow(BlockDriverState *bs, QCowL2Meta *m)
         goto fail;
     }
 
+#if 0
     /* Encrypt the data if necessary before writing it */
     if (bs->encrypted) {
         ret = qcow2_co_encrypt(bs,
@@ -977,6 +978,7 @@ perform_cow(BlockDriverState *bs, QCowL2Meta *m)
             goto fail;
         }
     }
+#endif
 
     /* And now we can write everything. If we have the guest data we
      * can write everything in one single operation */

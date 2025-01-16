@@ -12,7 +12,7 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qapi-visit-crypto.h"
+#include "qapi/qapi-visit-crypto.h"
 
 bool visit_type_QCryptoTLSCredsEndpoint(Visitor *v, const char *name,
                  QCryptoTLSCredsEndpoint *obj, Error **errp)

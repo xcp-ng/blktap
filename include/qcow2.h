@@ -25,7 +25,7 @@
 #ifndef BLOCK_QCOW2_H
 #define BLOCK_QCOW2_H
 
-#include "crypto/block.h"
+//#include "crypto/block.h"
 #include "qemu/coroutine.h"
 #include "qemu/units.h"
 #include "block/block_int.h"
@@ -360,8 +360,10 @@ typedef struct BDRVQcow2State {
     CoMutex lock;
 
     Qcow2CryptoHeaderExtension crypto_header; /* QCow2 header extension */
+#if 0
     QCryptoBlockOpenOptions *crypto_opts; /* Disk encryption runtime options */
     QCryptoBlock *crypto; /* Disk encryption format driver */
+#endif
     bool crypt_physical_offset; /* Whether to use virtual or physical offset
                                    for encryption initialization vector tweak */
     uint32_t crypt_method_header;

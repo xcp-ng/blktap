@@ -12,8 +12,8 @@
 
 #include "qemu/osdep.h"
 #include "qapi/dealloc-visitor.h"
-#include "qapi-types-crypto.h"
-#include "qapi-visit-crypto.h"
+#include "qapi/qapi-types-crypto.h"
+#include "qapi/qapi-visit-crypto.h"
 
 const QEnumLookup QCryptoTLSCredsEndpoint_lookup = {
     .array = (const char *const[]) {

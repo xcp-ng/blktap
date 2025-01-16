@@ -12,8 +12,8 @@
 
 #include "qemu/osdep.h"
 #include "qapi/dealloc-visitor.h"
-#include "qapi-types-sockets.h"
-#include "qapi-visit-sockets.h"
+#include "qapi/qapi-types-sockets.h"
+#include "qapi/qapi-visit-sockets.h"
 
 const QEnumLookup NetworkAddressFamily_lookup = {
     .array = (const char *const[]) {

@@ -21,7 +21,7 @@
 #include <linux/vm_sockets.h>
 #endif /* CONFIG_AF_VSOCK */
 
-#include "monitor/monitor.h"
+//#include "monitor/monitor.h"
 #include "qapi/clone-visitor.h"
 #include "qapi/error.h"
 #include "qapi/qapi-visit-sockets.h"
@@ -596,7 +596,7 @@ err:
 static int inet_parse_flag(const char *flagname, const char *optstr, bool *val,
                            Error **errp)
 {
-    char *end;
+    const char *end;
     size_t len;
 
     end = strstr(optstr, ",");
@@ -627,7 +627,7 @@ int inet_parse(InetSocketAddress *addr, const char *str, Error **errp)
     char port[33];
     int to;
     int pos;
-    char *begin;
+    const char *begin;
 
     memset(addr, 0, sizeof(*addr));
 
@@ -1137,21 +1137,23 @@ fail:
 
 static int socket_get_fd(const char *fdstr, Error **errp)
 {
-    Monitor *cur_mon = monitor_cur();
+    //Monitor *cur_mon = monitor_cur();
     int fd;
+#if 0
     if (cur_mon) {
         fd = monitor_get_fd(cur_mon, fdstr, errp);
         if (fd < 0) {
             return -1;
         }
     } else {
+#endif
         if (qemu_strtoi(fdstr, NULL, 10, &fd) < 0) {
             error_setg_errno(errp, errno,
                              "Unable to parse FD number %s",
                              fdstr);
             return -1;
         }
-    }
+    //}
     if (!fd_is_socket(fd)) {
         error_setg(errp, "File descriptor '%s' is not a socket", fdstr);
         close(fd);
@@ -1192,9 +1194,11 @@ int socket_connect(SocketAddress *addr, Error **errp)
         fd = unix_connect_saddr(&addr->u.q_unix, errp);
         break;
 
+#if 0
     case SOCKET_ADDRESS_TYPE_FD:
         fd = socket_get_fd(addr->u.fd.str, errp);
         break;
+#endif
 
     case SOCKET_ADDRESS_TYPE_VSOCK:
         fd = vsock_connect_saddr(&addr->u.vsock, errp);
@@ -1220,6 +1224,7 @@ int socket_listen(SocketAddress *addr, int num, Error **errp)
         fd = unix_listen_saddr(&addr->u.q_unix, num, errp);
         break;
 
+#if 0
     case SOCKET_ADDRESS_TYPE_FD:
         fd = socket_get_fd(addr->u.fd.str, errp);
         if (fd < 0) {
@@ -1242,6 +1247,7 @@ int socket_listen(SocketAddress *addr, int num, Error **errp)
             return -1;
         }
         break;
+#endif
 
     case SOCKET_ADDRESS_TYPE_VSOCK:
         fd = vsock_listen_saddr(&addr->u.vsock, num, errp);
@@ -1436,6 +1442,7 @@ SocketAddress *socket_remote_address(int fd, Error **errp)
 }
 
 
+#if 0
 SocketAddress *socket_address_flatten(SocketAddressLegacy *addr_legacy)
 {
     SocketAddress *addr;
@@ -1473,3 +1480,4 @@ SocketAddress *socket_address_flatten(SocketAddressLegacy *addr_legacy)
 
     return addr;
 }
+#endif

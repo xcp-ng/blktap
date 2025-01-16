@@ -26,11 +26,12 @@
 #define QEMU_MAIN_LOOP_H
 
 #include "block/aio.h"
-#include "qom/object.h"
-#include "sysemu/event-loop-base.h"
+//#include "qom/object.h"
+//#include "sysemu/event-loop-base.h"
 
 #define SIG_IPI SIGUSR1
 
+#if 0
 #define TYPE_MAIN_LOOP  "main-loop"
 OBJECT_DECLARE_TYPE(MainLoop, MainLoopClass, MAIN_LOOP)
 
@@ -38,6 +39,9 @@ struct MainLoop {
     EventLoopBase parent_obj;
 };
 typedef struct MainLoop MainLoop;
+#endif
+
+void qemu_init_cpu_loop(void);
 
 /**
  * qemu_init_main_loop: Set up the process so that it can run the main loop.

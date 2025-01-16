@@ -19,7 +19,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/rcu.h"
 #include "qemu/rcu_queue.h"
-#include "qemu/sockets.h"
+//#include "qemu/sockets.h"
 #include "qemu/cutils.h"
 #include "trace.h"
 #include "aio-posix.h"
@@ -686,7 +686,7 @@ bool aio_poll(AioContext *ctx, bool blocking)
             /* This is the sweet spot, no adjustment needed */
         } else if (block_ns > ctx->poll_max_ns) {
             /* We'd have to poll for too long, poll less */
-            int64_t old = ctx->poll_ns;
+            //int64_t old = ctx->poll_ns;
 
             if (ctx->poll_shrink) {
                 ctx->poll_ns /= ctx->poll_shrink;
@@ -698,7 +698,7 @@ bool aio_poll(AioContext *ctx, bool blocking)
         } else if (ctx->poll_ns < ctx->poll_max_ns &&
                    block_ns < ctx->poll_max_ns) {
             /* There is room to grow, poll longer */
-            int64_t old = ctx->poll_ns;
+            //int64_t old = ctx->poll_ns;
             int64_t grow = ctx->poll_grow;
 
             if (grow == 0) {

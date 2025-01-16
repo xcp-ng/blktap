@@ -14,7 +14,7 @@
 #define BLOCK_BACKEND_COMMON_H
 
 #include "qemu/iov.h"
-#include "block/throttle-groups.h"
+//#include "block/throttle-groups.h"
 
 /*
  * TODO Have to include block/block.h for a bunch of block layer
@@ -97,7 +97,9 @@ typedef struct BlockDevOps {
  * friends so that BlockBackends can be kept in lists outside block-backend.c
  */
 typedef struct BlockBackendPublic {
+#if 0
     ThrottleGroupMember throttle_group_member;
+#endif
 } BlockBackendPublic;
 
 #endif /* BLOCK_BACKEND_COMMON_H */

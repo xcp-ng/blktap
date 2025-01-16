@@ -1235,6 +1235,7 @@ static bool mirror_drained_poll(BlockJob *job)
     return !!s->in_flight;
 }
 
+#if 0
 static bool mirror_cancel(Job *job, bool force)
 {
     MirrorBlockJob *s = container_of(job, MirrorBlockJob, common.job);
@@ -1251,6 +1252,7 @@ static bool mirror_cancel(Job *job, bool force)
     }
     return force;
 }
+#endif
 
 static bool commit_active_cancel(Job *job, bool force)
 {
@@ -1258,6 +1260,7 @@ static bool commit_active_cancel(Job *job, bool force)
     return force || !job_is_ready(job);
 }
 
+#if 0
 static void mirror_change(BlockJob *job, BlockJobChangeOptions *opts,
                           Error **errp)
 {
@@ -1317,6 +1320,7 @@ static const BlockJobDriver mirror_job_driver = {
     .change                 = mirror_change,
     .query                  = mirror_query,
 };
+#endif
 
 static const BlockJobDriver commit_active_job_driver = {
     .job_driver = {
@@ -2004,6 +2008,7 @@ fail:
     return NULL;
 }
 
+#if 0
 void mirror_start(const char *job_id, BlockDriverState *bs,
                   BlockDriverState *target, const char *replaces,
                   int creation_flags, int64_t speed,
@@ -2038,6 +2043,7 @@ void mirror_start(const char *job_id, BlockDriverState *bs,
                      &mirror_job_driver, is_none_mode, base, false,
                      filter_node_name, true, copy_mode, false, errp);
 }
+#endif
 
 BlockJob *commit_active_start(const char *job_id, BlockDriverState *bs,
                               BlockDriverState *base, int creation_flags,

@@ -12,7 +12,7 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qapi-visit-sockets.h"
+#include "qapi/qapi-visit-sockets.h"
 
 bool visit_type_NetworkAddressFamily(Visitor *v, const char *name,
                  NetworkAddressFamily *obj, Error **errp)

@@ -62,7 +62,8 @@ void *qemu_try_memalign(size_t alignment, size_t size)
 #elif defined(CONFIG_MEMALIGN)
     ptr = memalign(alignment, size);
 #else
-    #error No function to allocate aligned memory available
+    ptr = aligned_alloc(alignment, size);
+    //#error No function to allocate aligned memory available
 #endif
     trace_qemu_memalign(alignment, size, ptr);
     return ptr;

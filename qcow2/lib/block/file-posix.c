@@ -39,8 +39,8 @@
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qstring.h"
 
-#include "scsi/pr-manager.h"
-#include "scsi/constants.h"
+//#include "scsi/pr-manager.h"
+//#include "scsi/constants.h"
 
 #if defined(__APPLE__) && (__MACH__)
 #include <sys/ioctl.h>
@@ -173,7 +173,7 @@ typedef struct BDRVRawState {
         uint64_t discard_bytes_ok;
     } stats;
 
-    PRManager *pr_mgr;
+    //PRManager *pr_mgr;
 } BDRVRawState;
 
 typedef struct BDRVRawReopenState {
@@ -317,6 +317,7 @@ static int probe_logical_blocksize(int fd, unsigned int *sector_size_p)
     return success ? 0 : -errno;
 }
 
+#if defined(HAVE_HOST_BLOCK_DEVICE)
 /**
  * Get physical block size of @fd.
  * On success, store it in @blk_size and return 0.
@@ -333,6 +334,7 @@ static int probe_physical_blocksize(int fd, unsigned int *blk_size)
     return -ENOTSUP;
 #endif
 }
+#endif
 
 /*
  * Returns true if no alignment restrictions are necessary even for files
@@ -597,7 +599,7 @@ static int raw_open_common(BlockDriverState *bs, QDict *options,
     QemuOpts *opts;
     Error *local_err = NULL;
     const char *filename = NULL;
-    const char *str;
+    //const char *str;
     BlockdevAioOptions aio, aio_default;
     int fd, ret;
     struct stat st;
@@ -670,6 +672,7 @@ static int raw_open_common(BlockDriverState *bs, QDict *options,
         abort();
     }
 
+#if 0
     str = qemu_opt_get(opts, "pr-manager");
     if (str) {
         s->pr_mgr = pr_manager_lookup(str, &local_err);
@@ -679,6 +682,7 @@ static int raw_open_common(BlockDriverState *bs, QDict *options,
             goto fail;
         }
     }
+#endif
 
     s->drop_cache = qemu_opt_get_bool(opts, "drop-cache", true);
     s->check_cache_dropped = qemu_opt_get_bool(opts, "x-check-cache-dropped",
@@ -1522,6 +1526,7 @@ static void raw_refresh_limits(BlockDriverState *bs, Error **errp)
     raw_refresh_zoned_limits(bs, &st, errp);
 }
 
+#if defined(HAVE_HOST_BLOCK_DEVICE)
 static int check_for_dasd(int fd)
 {
 #ifdef BIODASDINFO2
@@ -1597,8 +1602,9 @@ static int hdev_probe_geometry(BlockDriverState *bs, HDGeometry *geo)
     return -ENOTSUP;
 }
 #endif
+#endif
 
-#if defined(__linux__)
+#if defined(__linux__) && defined(HAVE_HOST_BLOCK_DEVICE)
 static int handle_aiocb_ioctl(void *opaque)
 {
     RawPosixAIOData *aiocb = opaque;
@@ -3481,7 +3487,7 @@ static int coroutine_fn raw_co_zone_mgmt(BlockDriverState *bs, BlockZoneOp op,
     };
 
     trace_zbd_zone_mgmt(bs, op_name, offset >> BDRV_SECTOR_BITS,
-                        len >> BDRV_SECTOR_BITS);
+    //                    len >> BDRV_SECTOR_BITS);
     ret = raw_thread_pool_submit(handle_aiocb_zone_mgmt, &acb);
     if (ret != 0) {
         update_zones_wp(bs, s->fd, offset, nrz);
@@ -4194,6 +4200,7 @@ hdev_co_ioctl(BlockDriverState *bs, unsigned long int req, void *buf)
         return ret;
     }
 
+#if 0
     if (req == SG_IO && s->pr_mgr) {
         struct sg_io_hdr *io_hdr = buf;
         if (io_hdr->cmdp[0] == PERSISTENT_RESERVE_OUT ||
@@ -4202,6 +4209,7 @@ hdev_co_ioctl(BlockDriverState *bs, unsigned long int req, void *buf)
                                       s->fd, io_hdr);
         }
     }
+#endif
 
     acb = (RawPosixAIOData) {
         .bs         = bs,

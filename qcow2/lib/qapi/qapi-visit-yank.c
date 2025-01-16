@@ -12,7 +12,7 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qapi-visit-yank.h"
+#include "qapi/qapi-visit-yank.h"
 
 bool visit_type_YankInstanceType(Visitor *v, const char *name,
                  YankInstanceType *obj, Error **errp)

@@ -12,9 +12,8 @@
 #ifndef BITOPS_H
 #define BITOPS_H
 
-
-#include "host-utils.h"
-#include "atomic.h"
+#include "qemu/host-utils.h"
+#include "qemu/atomic.h"
 
 #define BITS_PER_BYTE           CHAR_BIT
 #define BITS_PER_LONG           (sizeof (unsigned long) * BITS_PER_BYTE)

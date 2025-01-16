@@ -770,10 +770,12 @@ BdrvDirtyBitmap *bdrv_dirty_bitmap_next(BdrvDirtyBitmap *bitmap)
     return QLIST_NEXT(bitmap, list);
 }
 
+#if 0
 char *bdrv_dirty_bitmap_sha256(const BdrvDirtyBitmap *bitmap, Error **errp)
 {
     return hbitmap_sha256(bitmap->bitmap, errp);
 }
+#endif
 
 int64_t bdrv_dirty_bitmap_next_dirty(BdrvDirtyBitmap *bitmap, int64_t offset,
                                      int64_t bytes)

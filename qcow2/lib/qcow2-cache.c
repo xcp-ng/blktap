@@ -239,7 +239,7 @@ qcow2_cache_entry_flush(BlockDriverState *bs, Qcow2Cache *c, int i)
 
 int qcow2_cache_write(BlockDriverState *bs, Qcow2Cache *c)
 {
-    BDRVQcow2State *s = bs->opaque;
+    //BDRVQcow2State *s = bs->opaque;
     int result = 0;
     int ret;
     int i;
