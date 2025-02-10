@@ -272,6 +272,10 @@ td_commit(td_image_t *image, const char *name)
 {
 	td_driver_t *driver;
 
+	if (!image) {
+		return -ENODEV;
+	}
+
 	driver = image->driver;
 	if (!driver) {
 		return -ENODEV;

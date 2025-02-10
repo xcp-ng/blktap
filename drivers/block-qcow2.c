@@ -59,6 +59,8 @@
 #include "qapi/error.h"
 #include "sysemu/block-backend.h"
 #include "qapi/qmp/qdict.h"
+#include "qapi/qapi-commands-block-core.h"
+
 #include "tapdisk.h"
 #include "tapdisk-driver.h"
 #include "tapdisk-interface.h"
@@ -66,7 +68,7 @@
 #include "tapdisk-storage.h"
 //#include "block-crypto.h"
 
-#define DEBUGGING   0
+#define DEBUGGING   2
 
 #define __TRACE(s)							\
 	do {								\
@@ -93,6 +95,7 @@
 
 #define QCOW2_OP_READ             1
 #define QCOW2_OP_WRITE            2
+#define QCOW2_OP_COMMIT           3
 
 #define QCOW2_FLAG_OPEN_RDONLY         1
 #define QCOW2_FLAG_OPEN_NO_CACHE       2
@@ -114,7 +117,12 @@ struct qcow2_request {
     int                     error;
     uint8_t                 op;
     qcow2_flag_t            flags;
-    td_request_t            treq;
+    union {
+        /* OP_READ, OP_WRITE */
+        td_request_t        treq;
+        /* OP_COMMIT */
+        char *              top;
+    };
     struct qcow2_state      *state;
     BlockAIOCB              *aiocb;
     QLIST_ENTRY(qcow2_request) list;
@@ -176,6 +184,7 @@ struct qcow2_state {
 static void qcow2_complete(void *, int);
 static inline void do_aio_read(struct qcow2_state *s, struct qcow2_request *req);
 static inline void do_aio_write(struct qcow2_state *s, struct qcow2_request *req);
+static inline void do_commit(struct qcow2_state *s, struct qcow2_request *req);
 
 static int
 qcow2_initialize(struct qcow2_state *s, Error **perr)
@@ -227,6 +236,9 @@ static void qcow2_handle_requests(struct qcow2_state *s)
                 break;
             case QCOW2_OP_WRITE:
                 do_aio_write(s, req);
+                break;
+            case QCOW2_OP_COMMIT:
+                do_commit(s, req);
                 break;
         }
         pthread_mutex_lock(&lock);
@@ -859,6 +871,71 @@ fail:
     td_complete_request(treq, err);
 }
 
+#define COMMIT_JOB_ID "JIDCOMMIT0"
+static pthread_mutex_t commit_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t commit_cond = PTHREAD_COND_INITIALIZER;
+static JobInfo job_info;
+
+int
+qcow2_commit(td_driver_t *driver, const char *name)
+{
+    struct qcow2_state *s = (struct qcow2_state *)driver->data;
+    struct qcow2_request *req;
+    int err;
+
+    DBG(TLOG_DBG, "Qcow2: commit %s.\n", name);
+
+    req = alloc_qcow2_request(s);
+    if (!req)
+        return -EBUSY;
+
+    req->top   = strdup(name);
+    req->op    = QCOW2_OP_COMMIT;
+
+    pthread_mutex_lock(&lock);
+    QLIST_INSERT_HEAD(&s->inflight, req, list);
+    pthread_mutex_unlock(&lock);
+
+    qemu_bh_schedule(s->bh);
+
+    pthread_mutex_lock(&commit_lock);
+    pthread_cond_wait(&commit_cond, &commit_lock);
+    err = req->error;
+    pthread_mutex_unlock(&commit_lock);
+
+    free(req->top);
+    free_qcow2_request(s, req);
+
+    return err;
+}
+
+static inline void
+do_commit(struct qcow2_state *s, struct qcow2_request *req)
+{
+    Error *local_err = NULL;
+    char *node_name;
+    int err = 0;
+
+    node_name = blk_bs(s->conf.blk)->node_name;
+
+    DBG(TLOG_DBG, "Qcow2: block commit %s (node-name: '%s').\n", req->top, node_name);
+
+    qmp_block_commit(COMMIT_JOB_ID, node_name, NULL, NULL, NULL, req->top, NULL,
+            false, false, false, 0, false, BLOCKDEV_ON_ERROR_REPORT,
+            NULL, false, false, true, false, &local_err);
+
+    if (local_err) {
+        DPRINTF("qcow2_commit: error: %s\n", error_get_pretty(local_err));
+        error_free(local_err);
+        err = -EINVAL;
+    }
+
+    pthread_mutex_lock(&commit_lock);
+    req->error = err;
+    pthread_cond_signal(&commit_cond);
+    pthread_mutex_unlock(&commit_lock);
+}
+
 void
 qcow2_debug(td_driver_t *driver)
 {
@@ -895,5 +972,6 @@ struct tap_disk tapdisk_qcow = {
 	.td_queue_write     = qcow2_queue_write,
 	.td_get_parent_id   = qcow2_get_parent_id,
 	.td_validate_parent = qcow2_validate_parent,
+	.td_commit          = qcow2_commit,
 	.td_debug           = qcow2_debug,
 };
