@@ -292,6 +292,26 @@ td_commit(td_image_t *image, const char *name)
 	return driver->ops->td_commit(driver, name);
 }
 
+int
+td_query_commit_job(td_image_t *image, td_query_t *query)
+{
+	td_driver_t *driver;
+
+	driver = image->driver;
+	if (!driver) {
+		return -ENODEV;
+	}
+
+	if (!td_flag_test(driver->state, TD_DRIVER_OPEN)) {
+		return -EBADF;
+	}
+
+	if (!driver->ops->td_query_commit_job) {
+		return -EOPNOTSUPP;
+	}
+
+	return driver->ops->td_query_commit_job(driver, query);
+}
 void
 td_forward_request(td_request_t treq)
 {
