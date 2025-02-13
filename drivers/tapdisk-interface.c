@@ -297,6 +297,10 @@ td_query_commit_job(td_image_t *image, td_query_t *query)
 {
 	td_driver_t *driver;
 
+	if (!image) {
+		return -ENODEV;
+	}
+
 	driver = image->driver;
 	if (!driver) {
 		return -ENODEV;

@@ -60,6 +60,7 @@
 #include "sysemu/block-backend.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qapi-commands-block-core.h"
+#include "qapi/qapi-commands-job.h"
 
 #include "tapdisk.h"
 #include "tapdisk-driver.h"
@@ -96,6 +97,7 @@
 #define QCOW2_OP_READ             1
 #define QCOW2_OP_WRITE            2
 #define QCOW2_OP_COMMIT           3
+#define QCOW2_OP_QUERY            4
 
 #define QCOW2_FLAG_OPEN_RDONLY         1
 #define QCOW2_FLAG_OPEN_NO_CACHE       2
@@ -185,6 +187,7 @@ static void qcow2_complete(void *, int);
 static inline void do_aio_read(struct qcow2_state *s, struct qcow2_request *req);
 static inline void do_aio_write(struct qcow2_state *s, struct qcow2_request *req);
 static inline void do_commit(struct qcow2_state *s, struct qcow2_request *req);
+static inline void do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req);
 
 static int
 qcow2_initialize(struct qcow2_state *s, Error **perr)
@@ -239,6 +242,9 @@ static void qcow2_handle_requests(struct qcow2_state *s)
                 break;
             case QCOW2_OP_COMMIT:
                 do_commit(s, req);
+                break;
+            case QCOW2_OP_QUERY:
+                do_query_commit_job(s, req);
                 break;
         }
         pthread_mutex_lock(&lock);
@@ -936,6 +942,106 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
     pthread_mutex_unlock(&commit_lock);
 }
 
+int
+qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
+{
+    struct qcow2_state *s = (struct qcow2_state *)driver->data;
+    struct qcow2_request *req;
+    int err;
+
+    DBG(TLOG_DBG, "Qcow2: query commit job.\n");
+
+    req = alloc_qcow2_request(s);
+    if (!req)
+        return -EBUSY;
+
+    req->op    = QCOW2_OP_QUERY;
+
+    pthread_mutex_lock(&lock);
+    QLIST_INSERT_HEAD(&s->inflight, req, list);
+    pthread_mutex_unlock(&lock);
+
+    qemu_bh_schedule(s->bh);
+
+    pthread_mutex_lock(&commit_lock);
+    pthread_cond_wait(&commit_cond, &commit_lock);
+
+    query->status = JobStatus_str(job_info.status);
+    query->current_progress = job_info.current_progress;
+    query->total_progress = job_info.total_progress;
+
+    memset(&job_info, 0, sizeof(JobInfo));
+
+    err = req->error;
+    pthread_mutex_unlock(&commit_lock);
+
+    DBG(TLOG_DBG, "Qcow2: query commit job done.\n");
+
+    free_qcow2_request(s, req);
+
+    return err;
+}
+
+static inline void
+do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
+{
+    JobInfoList *jobs_info;
+    Error *local_err = NULL;
+    int err = 0;
+
+    jobs_info = qmp_query_jobs(&local_err);
+    if (local_err) {
+        DPRINTF("qcow2_query_commit_job: query job error: %s\n", error_get_pretty(local_err));
+        error_free(local_err);
+        err = -EINVAL;
+        goto signal;
+    }
+
+    if (jobs_info && jobs_info->value) {
+        DPRINTF("Qcow2: commit job '%s'.\n", JobStatus_str(jobs_info->value->status));
+
+        pthread_mutex_lock(&commit_lock);
+        job_info.status = jobs_info->value->status;
+        job_info.current_progress = jobs_info->value->current_progress;
+        job_info.total_progress = jobs_info->value->total_progress;
+        pthread_mutex_unlock(&commit_lock);
+
+        DBG(TLOG_DBG, "Qcow2: commit job status '%s'\n", JobStatus_str(jobs_info->value->status));
+        if (jobs_info->value->status == JOB_STATUS_READY) {
+            qmp_job_complete(COMMIT_JOB_ID, &local_err);
+            if (local_err) {
+                DPRINTF("qcow2_query_commit_job: job complete error: %s\n", error_get_pretty(local_err));
+                error_free(local_err);
+                err = -EINVAL;
+            }
+        }
+        if (jobs_info->value->status == JOB_STATUS_PENDING) {
+            qmp_job_finalize(COMMIT_JOB_ID, &local_err);
+            if (local_err) {
+                DPRINTF("qcow2_query_commit_job: job finalize error: %s\n", error_get_pretty(local_err));
+                error_free(local_err);
+                err = -EINVAL;
+            }
+        }
+        if (jobs_info->value->status == JOB_STATUS_CONCLUDED) {
+            qmp_job_dismiss(COMMIT_JOB_ID, &local_err);
+            if (local_err) {
+                DPRINTF("qcow2_query_commit_job: job dismiss error: %s\n", error_get_pretty(local_err));
+                error_free(local_err);
+                err = -EINVAL;
+            }
+        }
+    } else {
+        DPRINTF("Qcow2: commit job 'undefined'.\n");
+    }
+
+signal:
+    pthread_mutex_lock(&commit_lock);
+    req->error = err;
+    pthread_cond_signal(&commit_cond);
+    pthread_mutex_unlock(&commit_lock);
+}
+
 void
 qcow2_debug(td_driver_t *driver)
 {
@@ -973,5 +1079,6 @@ struct tap_disk tapdisk_qcow = {
 	.td_get_parent_id   = qcow2_get_parent_id,
 	.td_validate_parent = qcow2_validate_parent,
 	.td_commit          = qcow2_commit,
+	.td_query_commit_job = qcow2_query_commit_job,
 	.td_debug           = qcow2_debug,
 };
