@@ -94,10 +94,12 @@
   #define TRACE(s)                   ((void)0)
 #endif
 
-#define QCOW2_OP_READ             1
-#define QCOW2_OP_WRITE            2
-#define QCOW2_OP_COMMIT           3
-#define QCOW2_OP_QUERY            4
+enum qcow2_ops {
+    QCOW2_OP_READ,
+    QCOW2_OP_WRITE,
+    QCOW2_OP_COMMIT,
+    QCOW2_OP_QUERY,
+};
 
 #define QCOW2_FLAG_OPEN_RDONLY         1
 #define QCOW2_FLAG_OPEN_NO_CACHE       2
@@ -117,7 +119,7 @@ typedef uint32_t qcow2_flag_t;
 
 struct qcow2_request {
     int                     error;
-    uint8_t                 op;
+    enum qcow2_ops          op;
     qcow2_flag_t            flags;
     union {
         /* OP_READ, OP_WRITE */
