@@ -145,6 +145,21 @@ struct qcow2_state {
     QEMUBH                    *bh;
     AioContext                *ctx;
 
+    /* Open thread */
+    pthread_t                 thread;
+    pthread_mutex_t           lock;
+    pthread_cond_t            cond;
+    bool                      loop_cond;
+    int                       open_status;
+    MemReentrancyGuard        mem_reentrancy_guard;
+
+    /* commit/query synchronization */
+#define COMMIT_JOB_ID "JIDCOMMIT0"
+    pthread_mutex_t commit_lock;
+    pthread_cond_t commit_cond;
+    JobInfo job_info;
+
+    /* Stats */
     uint64_t                  queued;
     uint64_t                  completed;
     uint64_t                  returned;
@@ -205,22 +220,15 @@ qcow2_free(struct qcow2_state *s)
         bql_unlock();
 }
 
-static pthread_t thread;
-static pthread_mutex_t lock;
-static pthread_cond_t cond;
-static bool loop_cond = true;
-static int open_status;
-static MemReentrancyGuard mem_reentrancy_guard;
-
 static void qcow2_handle_requests(struct qcow2_state *s)
 {
     struct qcow2_request *req;
 
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(&s->lock);
     while (!QLIST_EMPTY(&s->inflight)) {
         req = QLIST_FIRST(&s->inflight);
         QLIST_REMOVE(req, list);
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&s->lock);
 
 	switch (req->op) {
             case QCOW2_OP_READ:
@@ -236,9 +244,9 @@ static void qcow2_handle_requests(struct qcow2_state *s)
                 do_query_commit_job(s, req);
                 break;
         }
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&s->lock);
     }
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&s->lock);
 }
 
 static void block_bh(void *opaque)
@@ -394,23 +402,23 @@ qcow2_open(void *opaque)
     s->ctx = qemu_get_aio_context();
     s->bh = aio_bh_new_guarded(s->ctx, block_bh,
                                s,
-                               &mem_reentrancy_guard);
+                               &s->mem_reentrancy_guard);
 
     DBG(TLOG_INFO, "qcow2_open: ctx %p bh %p\n", s->ctx, s->bh);
 
     DBG(TLOG_INFO, "qcow2_open: done (sz:%"PRIu64", sct:%lu, inf:%u)\n",
         driver->info.size, driver->info.sector_size, driver->info.info);
 
-    pthread_mutex_lock(&lock);
-    open_status = 0;
-    pthread_cond_signal(&cond);
+    pthread_mutex_lock(&s->lock);
+    s->open_status = 0;
+    pthread_cond_signal(&s->cond);
 
-    while (loop_cond) {
-        pthread_mutex_unlock(&lock);
+    while (s->loop_cond) {
+        pthread_mutex_unlock(&s->lock);
         main_loop_wait(false);
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&s->lock);
     }
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&s->lock);
 
     qemu_bh_delete(s->bh);
     blk_unref(conf->blk);
@@ -423,10 +431,10 @@ fail1:
     EPRINTF("open error: %s\n", error_get_pretty(local_err));
     error_free(local_err);
 
-    pthread_mutex_lock(&lock);
-    open_status = -EINVAL;
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&s->lock);
+    s->open_status = -EINVAL;
+    pthread_cond_signal(&s->cond);
+    pthread_mutex_unlock(&s->lock);
 
     qcow2_free(s);
     return NULL;
@@ -438,7 +446,6 @@ _qcow2_open(td_driver_t *driver, const char *name,
 {
     int err;
     struct qcow2_state *s;
-    pthread_condattr_t attr;
 
     /* pre-allocate for all but NFS and LVM storage */
     driver->storage = tapdisk_storage_type(name);
@@ -453,31 +460,27 @@ _qcow2_open(td_driver_t *driver, const char *name,
     s->encryption = encryption;
     s->flags = flags;
 
-    err = pthread_condattr_init(&attr);
-    if (err) {
-        EPRINTF("failed to init thread attribute %d\n", err);
-        return err;
-    }
-    err = pthread_cond_init(&cond, &attr);
+    err = pthread_cond_init(&s->cond, NULL);
     if (err) {
         EPRINTF("failed to init thread condition %d\n", err);
         return err;
     }
-    err = pthread_condattr_destroy(&attr);
+    pthread_mutex_init(&s->lock, NULL);
+    err = pthread_cond_init(&s->commit_cond, NULL);
     if (err) {
-        EPRINTF("failed to destroy thread attribute %d\n", err);
+        EPRINTF("failed to init thread condition %d\n", err);
         return err;
     }
-    pthread_mutex_init(&lock, NULL);
+    pthread_mutex_init(&s->commit_lock, NULL);
 
-    pthread_mutex_lock(&lock);
-    loop_cond = true;
-    pthread_create(&thread, NULL, qcow2_open, s);
+    pthread_mutex_lock(&s->lock);
+    s->loop_cond = true;
+    pthread_create(&s->thread, NULL, qcow2_open, s);
 
-    pthread_cond_wait(&cond, &lock);
-    err = open_status;
-    open_status = 0;
-    pthread_mutex_unlock(&lock);
+    pthread_cond_wait(&s->cond, &s->lock);
+    err = s->open_status;
+    s->open_status = 0;
+    pthread_mutex_unlock(&s->lock);
 
     return err;
 }
@@ -491,24 +494,35 @@ _qcow2_close(td_driver_t *driver)
 
     DBG(TLOG_WARN, "qcow2_close\n");
 
-    pthread_mutex_lock(&lock);
-    loop_cond = false;
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&s->lock);
+    s->loop_cond = false;
+    pthread_mutex_unlock(&s->lock);
 
-    pthread_kill(thread, SIGUSR1);
+    pthread_kill(s->thread, SIGUSR1);
 
-    err = pthread_join(thread, &res);
+    err = pthread_join(s->thread, &res);
     if (err) {
         EPRINTF("failed to join thread %d\n", err);
         return err;
     }
 
-    err = pthread_cond_destroy(&cond);
+    err = pthread_cond_destroy(&s->commit_cond);
     if (err) {
         EPRINTF("failed to destroy thread condition %d\n", err);
         return err;
     }
-    err = pthread_mutex_destroy(&lock);
+    err = pthread_mutex_destroy(&s->commit_lock);
+    if (err) {
+        EPRINTF("failed to destroy mutex %d\n", err);
+        return err;
+    }
+
+    err = pthread_cond_destroy(&s->cond);
+    if (err) {
+        EPRINTF("failed to destroy thread condition %d\n", err);
+        return err;
+    }
+    err = pthread_mutex_destroy(&s->lock);
     if (err) {
         EPRINTF("failed to destroy mutex %d\n", err);
         return err;
@@ -570,16 +584,16 @@ alloc_qcow2_request(struct qcow2_state *s)
 {
 	struct qcow2_request *req = NULL;
 
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&s->lock);
 	if (s->vreq_free_count > 0) {
 		req = s->vreq_free[--s->vreq_free_count];
-                pthread_mutex_unlock(&lock);
+                pthread_mutex_unlock(&s->lock);
 		ASSERT(req->treq.secs == 0);
 		init_qcow2_request(s, req);
 		return req;
 	}
 
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&s->lock);
 	return NULL;
 }
 
@@ -587,9 +601,9 @@ static inline void
 free_qcow2_request(struct qcow2_state *s, struct qcow2_request *req)
 {
 	memset(req, 0, sizeof(struct qcow2_request));
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&s->lock);
 	s->vreq_free[s->vreq_free_count++] = req;
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&s->lock);
 
         qemu_iovec_reset(&req->qiov);
 }
@@ -742,9 +756,9 @@ schedule_data_read(struct qcow2_state *s, td_request_t *treq)
 	req->treq  = *treq;
 	req->op    = QCOW2_OP_READ;
 
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&s->lock);
         QLIST_INSERT_HEAD(&s->inflight, req, list);
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&s->lock);
 
         qemu_bh_schedule(s->bh);
 
@@ -768,9 +782,9 @@ schedule_data_write(struct qcow2_state *s, td_request_t *treq)
 	req->treq  = *treq;
 	req->op    = QCOW2_OP_WRITE;
 
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&s->lock);
         QLIST_INSERT_HEAD(&s->inflight, req, list);
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&s->lock);
 
         qemu_bh_schedule(s->bh);
 
@@ -840,11 +854,6 @@ fail:
     td_complete_request(treq, err);
 }
 
-#define COMMIT_JOB_ID "JIDCOMMIT0"
-static pthread_mutex_t commit_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t commit_cond = PTHREAD_COND_INITIALIZER;
-static JobInfo job_info;
-
 int
 qcow2_commit(td_driver_t *driver, const char *name)
 {
@@ -861,16 +870,16 @@ qcow2_commit(td_driver_t *driver, const char *name)
     req->top   = strdup(name);
     req->op    = QCOW2_OP_COMMIT;
 
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(&s->lock);
     QLIST_INSERT_HEAD(&s->inflight, req, list);
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&s->lock);
 
     qemu_bh_schedule(s->bh);
 
-    pthread_mutex_lock(&commit_lock);
-    pthread_cond_wait(&commit_cond, &commit_lock);
+    pthread_mutex_lock(&s->commit_lock);
+    pthread_cond_wait(&s->commit_cond, &s->commit_lock);
     err = req->error;
-    pthread_mutex_unlock(&commit_lock);
+    pthread_mutex_unlock(&s->commit_lock);
 
     free(req->top);
     free_qcow2_request(s, req);
@@ -899,10 +908,10 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
         err = -EINVAL;
     }
 
-    pthread_mutex_lock(&commit_lock);
+    pthread_mutex_lock(&s->commit_lock);
     req->error = err;
-    pthread_cond_signal(&commit_cond);
-    pthread_mutex_unlock(&commit_lock);
+    pthread_cond_signal(&s->commit_cond);
+    pthread_mutex_unlock(&s->commit_lock);
 }
 
 int
@@ -920,23 +929,23 @@ qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 
     req->op    = QCOW2_OP_QUERY;
 
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(&s->lock);
     QLIST_INSERT_HEAD(&s->inflight, req, list);
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_unlock(&s->lock);
 
     qemu_bh_schedule(s->bh);
 
-    pthread_mutex_lock(&commit_lock);
-    pthread_cond_wait(&commit_cond, &commit_lock);
+    pthread_mutex_lock(&s->commit_lock);
+    pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 
-    query->status = JobStatus_str(job_info.status);
-    query->current_progress = job_info.current_progress;
-    query->total_progress = job_info.total_progress;
+    query->status = JobStatus_str(s->job_info.status);
+    query->current_progress = s->job_info.current_progress;
+    query->total_progress = s->job_info.total_progress;
 
-    memset(&job_info, 0, sizeof(JobInfo));
+    memset(&s->job_info, 0, sizeof(JobInfo));
 
     err = req->error;
-    pthread_mutex_unlock(&commit_lock);
+    pthread_mutex_unlock(&s->commit_lock);
 
     DBG(TLOG_DBG, "Qcow2: query commit job done.\n");
 
@@ -963,11 +972,11 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
     if (jobs_info && jobs_info->value) {
         DPRINTF("Qcow2: commit job '%s'.\n", JobStatus_str(jobs_info->value->status));
 
-        pthread_mutex_lock(&commit_lock);
-        job_info.status = jobs_info->value->status;
-        job_info.current_progress = jobs_info->value->current_progress;
-        job_info.total_progress = jobs_info->value->total_progress;
-        pthread_mutex_unlock(&commit_lock);
+        pthread_mutex_lock(&s->commit_lock);
+        s->job_info.status = jobs_info->value->status;
+        s->job_info.current_progress = jobs_info->value->current_progress;
+        s->job_info.total_progress = jobs_info->value->total_progress;
+        pthread_mutex_unlock(&s->commit_lock);
 
         DBG(TLOG_DBG, "Qcow2: commit job status '%s'\n", JobStatus_str(jobs_info->value->status));
         if (jobs_info->value->status == JOB_STATUS_READY) {
@@ -999,10 +1008,10 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
     }
 
 signal:
-    pthread_mutex_lock(&commit_lock);
+    pthread_mutex_lock(&s->commit_lock);
     req->error = err;
-    pthread_cond_signal(&commit_cond);
-    pthread_mutex_unlock(&commit_lock);
+    pthread_cond_signal(&s->commit_cond);
+    pthread_mutex_unlock(&s->commit_lock);
 }
 
 void
