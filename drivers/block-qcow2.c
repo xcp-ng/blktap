@@ -101,26 +101,14 @@ enum qcow2_ops {
     QCOW2_OP_QUERY,
 };
 
-#define QCOW2_FLAG_OPEN_RDONLY         1
-#define QCOW2_FLAG_OPEN_NO_CACHE       2
-#define QCOW2_FLAG_OPEN_QUIET          4
-#define QCOW2_FLAG_OPEN_STRICT         8
-#define QCOW2_FLAG_OPEN_QUERY          16
-#define QCOW2_FLAG_OPEN_PREALLOCATE    32
-#define QCOW2_FLAG_OPEN_NO_O_DIRECT    64
-#define QCOW2_FLAG_OPEN_LOCAL_CACHE    128
-
 struct qcow2_state;
 struct qcow2_request;
-
-typedef uint32_t qcow2_flag_t;
 
 #define QCOW2_REQS 32
 
 struct qcow2_request {
     int                     error;
     enum qcow2_ops          op;
-    qcow2_flag_t            flags;
     union {
         /* OP_READ, OP_WRITE */
         td_request_t        treq;
@@ -144,8 +132,7 @@ struct qcow2_state {
     td_driver_t               *driver;
     const char                *name;
     struct td_vbd_encryption  *encryption;
-    td_flag_t                 td_flags;
-    qcow2_flag_t              flags;
+    td_flag_t                 flags;
 
     BlockConf                 conf;
     int                       blk_shift;
@@ -267,7 +254,7 @@ qcow2_open(void *opaque)
     int o_flags, err, i;
     struct qcow2_state *s;
     td_driver_t *driver;
-    qcow2_flag_t flags;
+    td_flag_t flags;
     const char *name;
     QDict *options;
     QDict *file_layer;
@@ -293,27 +280,25 @@ qcow2_open(void *opaque)
 
     o_flags = 0;
 
-    if (test_qcow2_flag(flags, QCOW2_FLAG_OPEN_RDONLY))
+    if (test_qcow2_flag(flags, TD_OPEN_RDONLY))
         clear_qcow2_flag(o_flags, BDRV_O_RDWR);
     else
         set_qcow2_flag(o_flags, BDRV_O_RDWR);
 
-    if ((test_qcow2_flag(flags, QCOW2_FLAG_OPEN_RDONLY) ||
-                test_qcow2_flag(flags, QCOW2_FLAG_OPEN_LOCAL_CACHE)) &&
-            test_qcow2_flag(flags, QCOW2_FLAG_OPEN_NO_O_DIRECT)) {
+    if ((test_qcow2_flag(flags, TD_OPEN_RDONLY) ||
+                test_qcow2_flag(flags, TD_OPEN_LOCAL_CACHE)) &&
+            test_qcow2_flag(flags, TD_OPEN_NO_O_DIRECT)) {
         clear_qcow2_flag(o_flags, BDRV_O_NOCACHE);
         cache = "writeback";
         has_aio_native = false;
     }
 
-    if (test_qcow2_flag(flags, QCOW2_FLAG_OPEN_RDONLY))
-        clear_qcow2_flag(o_flags, BDRV_O_RDWR);
-    if (test_qcow2_flag(flags, QCOW2_FLAG_OPEN_QUERY)) {
+    if (test_qcow2_flag(flags, TD_OPEN_QUERY)) {
         clear_qcow2_flag(o_flags, BDRV_O_RDWR);
         set_qcow2_flag(o_flags, BDRV_O_NO_IO);
         set_qcow2_flag(o_flags, BDRV_O_NOCACHE);
     }
-    if (test_qcow2_flag(o_flags, QCOW2_FLAG_OPEN_LOCAL_CACHE)) {
+    if (test_qcow2_flag(o_flags, TD_OPEN_LOCAL_CACHE)) {
         cache = "writeback";
         has_aio_native = false;
     }
@@ -378,7 +363,7 @@ qcow2_open(void *opaque)
         goto fail;
     }
 
-    if (!blkconf_apply_backend_options(conf, test_qcow2_flag(flags, QCOW2_FLAG_OPEN_RDONLY), true, &local_err)) {
+    if (!blkconf_apply_backend_options(conf, test_qcow2_flag(flags, TD_OPEN_RDONLY), true, &local_err)) {
         goto fail;
     }
 
@@ -454,32 +439,11 @@ _qcow2_open(td_driver_t *driver, const char *name,
     int err;
     struct qcow2_state *s;
     pthread_condattr_t attr;
-    qcow2_flag_t qcow2_flags = 0;
-
-    if (flags & TD_OPEN_RDONLY)
-        qcow2_flags |= QCOW2_FLAG_OPEN_RDONLY;
-    if (flags & TD_OPEN_NO_O_DIRECT)
-        qcow2_flags |= QCOW2_FLAG_OPEN_NO_O_DIRECT;
-    if (flags & TD_OPEN_QUIET)
-        qcow2_flags |= QCOW2_FLAG_OPEN_QUIET;
-    if (flags & TD_OPEN_STRICT)
-        qcow2_flags |= QCOW2_FLAG_OPEN_STRICT;
-    if (flags & TD_OPEN_QUERY)
-        qcow2_flags |= (QCOW2_FLAG_OPEN_QUERY  |
-                QCOW2_FLAG_OPEN_QUIET  |
-                QCOW2_FLAG_OPEN_RDONLY |
-                QCOW2_FLAG_OPEN_NO_CACHE);
-    if (flags & TD_OPEN_LOCAL_CACHE)
-        qcow2_flags |= QCOW2_FLAG_OPEN_LOCAL_CACHE;
 
     /* pre-allocate for all but NFS and LVM storage */
     driver->storage = tapdisk_storage_type(name);
 
-    if (driver->storage != TAPDISK_STORAGE_TYPE_NFS &&
-            driver->storage != TAPDISK_STORAGE_TYPE_LVM)
-        qcow2_flags |= QCOW2_FLAG_OPEN_PREALLOCATE;
-
-    DPRINTF("%s: name %s, flags %x + %x\n", __func__, name, flags, qcow2_flags);
+    DPRINTF("%s: name %s, flags %x\n", __func__, name, flags);
 
     s = (struct qcow2_state *)driver->data;
     memset(s, 0, sizeof(struct qcow2_state));
@@ -487,8 +451,7 @@ _qcow2_open(td_driver_t *driver, const char *name,
     s->driver = driver;
     s->name = name;
     s->encryption = encryption;
-    s->td_flags = flags;
-    s->flags  = qcow2_flags;
+    s->flags = flags;
 
     err = pthread_condattr_init(&attr);
     if (err) {
@@ -768,7 +731,7 @@ do_aio_write(struct qcow2_state *s, struct qcow2_request *req)
 }
 
 static int
-schedule_data_read(struct qcow2_state *s, td_request_t *treq, qcow2_flag_t flags)
+schedule_data_read(struct qcow2_state *s, td_request_t *treq)
 {
 	struct qcow2_request *req;
 
@@ -777,7 +740,6 @@ schedule_data_read(struct qcow2_state *s, td_request_t *treq, qcow2_flag_t flags
 		return -EBUSY;
 
 	req->treq  = *treq;
-	req->flags = flags;
 	req->op    = QCOW2_OP_READ;
 
         pthread_mutex_lock(&lock);
@@ -787,15 +749,15 @@ schedule_data_read(struct qcow2_state *s, td_request_t *treq, qcow2_flag_t flags
         qemu_bh_schedule(s->bh);
 
 	DBG(TLOG_DBG, "%s: lsec: 0x%08"PRIx64", "
-            "nr_secs: 0x%08x, flags: 0x%08x, buf: %p, id %d\n",
-            treq->image->name, treq->sec, treq->secs, flags,
+            "nr_secs: 0x%08x, buf: %p, id %d\n",
+            treq->image->name, treq->sec, treq->secs,
             treq->buf, req->id);
 
 	return 0;
 }
 
 static int
-schedule_data_write(struct qcow2_state *s, td_request_t *treq, qcow2_flag_t flags)
+schedule_data_write(struct qcow2_state *s, td_request_t *treq)
 {
 	struct qcow2_request *req = NULL;
 
@@ -804,7 +766,6 @@ schedule_data_write(struct qcow2_state *s, td_request_t *treq, qcow2_flag_t flag
 		return -EBUSY;
 
 	req->treq  = *treq;
-	req->flags = flags;
 	req->op    = QCOW2_OP_WRITE;
 
         pthread_mutex_lock(&lock);
@@ -814,8 +775,8 @@ schedule_data_write(struct qcow2_state *s, td_request_t *treq, qcow2_flag_t flag
         qemu_bh_schedule(s->bh);
 
 	DBG(TLOG_DBG, "%s: lsec: 0x%08"PRIx64", "
-            "nr_secs: 0x%04x, flags: 0x%08x, id %d\n",
-            treq->image->name, treq->sec, treq->secs, req->flags, req->id);
+            "nr_secs: 0x%04x, id %d\n",
+            treq->image->name, treq->sec, treq->secs, req->id);
 
 	return 0;
 }
@@ -850,7 +811,7 @@ qcow2_queue_read(td_driver_t *driver, td_request_t treq)
     }
 #endif
 
-    err = schedule_data_read(s, &treq, 0);
+    err = schedule_data_read(s, &treq);
     if (err)
         goto fail;
 
@@ -869,7 +830,7 @@ qcow2_queue_write(td_driver_t *driver, td_request_t treq)
 	DBG(TLOG_DBG, "%s: lsec: 0x%08"PRIx64", secs: 0x%04x, (seg: %d)\n",
             treq.image->name, treq.sec, treq.secs, treq.sidx);
 
-    err = schedule_data_write(s, &treq, 0);
+    err = schedule_data_write(s, &treq);
     if (err)
         goto fail;
 
