@@ -1824,8 +1824,8 @@ tapdisk_vbd_issue_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 		goto fail;
 	}
 
-	for (i = 0; i < vreq->iovcnt; i++) {
-		struct td_iovec *iov = &vreq->iov[i];
+	for (i = vreq->iovcnt - 1; i >= 0; i--) {
+		struct td_iovec *iov = &vreq->iov[vreq->iovcnt - i - 1];
 		td_request_t treq;
 
 		bzero(&treq, sizeof(treq));
