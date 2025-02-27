@@ -281,6 +281,7 @@ xenio_blkif_put_response(struct td_blkif_queue * const queue,
 			 struct td_xenblkif_req *req, int const status, bool const final)
 {
     blkif_common_back_ring_t * const ring = &queue->rings.common;
+    int notify;
 
     if (req) {
         blkif_response_t * msg = xenio_blkif_get_response(queue,
@@ -305,28 +306,25 @@ xenio_blkif_put_response(struct td_blkif_queue * const queue,
                    req->msg.sector_number/*, status*/);
     }
 
-    if (final) {
-        int notify;
-        RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
-        if (notify) {
-            struct td_xenblkif* const blkif = queue->blkif;
-            uint16_t __unused qid = tapdisk_xenblkif_queue_id(queue);
+    RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
+    if (final || notify) {
+	struct td_xenblkif* const blkif = queue->blkif;
+        uint16_t __unused qid = tapdisk_xenblkif_queue_id(queue);
 
-            tracepoint(tapdisk, evtchn_notify, qid, TP_PHASE_BEGIN);
-            int err = xenevtchn_notify(queue->ctx->xce_handle, queue->ctx->port);
-            tracepoint(tapdisk, evtchn_notify, qid, TP_PHASE_END);
+        tracepoint(tapdisk, evtchn_notify, qid, TP_PHASE_BEGIN);
+        int err = xenevtchn_notify(queue->ctx->xce_handle, queue->ctx->port);
+        tracepoint(tapdisk, evtchn_notify, qid, TP_PHASE_END);
 
-            if (err < 0) {
-                err = -errno;
-                if (req) {
-                    RING_ERR(blkif, "req %lu: failed to notify event channel: "
-                            "%s\n", req->msg.id, strerror(-err));
-                } else {
-                    RING_ERR(blkif, "failed to notify event channel: %s\n",
-                            strerror(-err));
-                }
-                return err;
+        if (err < 0) {
+            err = -errno;
+            if (req) {
+                RING_ERR(blkif, "req %lu: failed to notify event channel: "
+                        "%s\n", req->msg.id, strerror(-err));
+            } else {
+                RING_ERR(blkif, "failed to notify event channel: %s\n",
+                        strerror(-err));
             }
+            return err;
         }
     }
 
