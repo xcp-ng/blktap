@@ -648,11 +648,12 @@ signal_completion(struct qcow2_request *r)
 {
 	struct qcow2_state *s = r->state;
 	td_vbd_queue_t *queue = r->treq.vreq->vqueue;
+	int notify;
 
-	td_complete_request(r->treq, r->error);
+	notify = td_complete_request(r->treq, r->error);
 	DBG(TLOG_DBG, "lsec: 0x%08"PRIx64", blk: 0x%04x, "
 		"err: %d\n", r->treq.sec, r->treq.secs, r->error);
-	if (r->error == 0) {
+	if (r->error == 0 && notify) {
 		tapdisk_vbd_kick(queue, true);
 		s->kick++;
 	}
