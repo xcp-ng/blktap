@@ -349,13 +349,13 @@ td_forward_request(td_request_t treq)
 	tapdisk_vbd_forward_request(treq);
 }
 
-void
+int
 td_complete_request(td_request_t treq, int res)
 {
 	td_queue_id_t __unused qid = treq.vreq->vqueue - treq.vreq->vqueue->vbd->queues;
 	tracepoint(tapdisk, driver_complete,
 		   qid, treq.vreq->req_id, treq.op, treq.sec, treq.secs/*, res*/);
-	treq.cb(treq, res);
+	return treq.cb(treq, res);
 }
 
 void
