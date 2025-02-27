@@ -1685,8 +1685,6 @@ int
 tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 {
 	td_image_t *image;
-	td_request_t treq;
-	bzero(&treq, sizeof(treq));
 	td_sector_t sec;
 	int i, err;
 
@@ -1712,9 +1710,11 @@ tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 		goto fail;
 	}
 
-	for (i = 0; i < vreq->iovcnt; i++) {
-		struct td_iovec *iov = &vreq->iov[i];
+	for (i = vreq->iovcnt - 1; i >= 0; i--) {
+		struct td_iovec *iov = &vreq->iov[vreq->iovcnt - i - 1];
+		td_request_t treq;
 
+		bzero(&treq, sizeof(treq));
 		treq.sidx           = i;
 		treq.buf            = iov->base;
 		treq.sec            = sec;
