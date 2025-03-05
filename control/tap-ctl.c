@@ -1030,6 +1030,52 @@ usage:
 	return EINVAL;
 }
 
+static void
+tap_cli_cancel_commit_job_usage(FILE *stream)
+{
+	fprintf(stream, "usage: cancel <-p pid> <-m minor> [-w]\n");
+}
+
+int
+tap_cli_cancel_commit_job(int argc, char **argv)
+{
+	int c, pid, minor;
+        bool wait;
+
+	pid   = -1;
+	minor = -1;
+        wait  = false;
+
+	optind = 0;
+	while ((c = getopt(argc, argv, "p:m:wh")) != -1) {
+		switch (c) {
+		case 'p':
+			pid = atoi(optarg);
+			break;
+		case 'm':
+			minor = atoi(optarg);
+			break;
+		case 'w':
+			wait = true;
+			break;
+		case '?':
+			goto usage;
+		case 'h':
+			tap_cli_cancel_commit_job_usage(stdout);
+			return 0;
+		}
+	}
+
+	if (pid == -1 || minor == -1)
+		goto usage;
+
+	return tap_ctl_cancel_commit_job(pid, minor, wait);
+
+usage:
+	tap_cli_cancel_commit_job_usage(stderr);
+	return EINVAL;
+}
+
 struct command commands[] = {
 	{ .name = "list",         .func = tap_cli_list          },
 	{ .name = "allocate",     .func = tap_cli_allocate      },
@@ -1048,6 +1094,7 @@ struct command commands[] = {
 	{ .name = "check",        .func = tap_cli_check         },
 	{ .name = "commit",       .func = tap_cli_commit        },
 	{ .name = "query",        .func = tap_cli_query_commit_job },
+	{ .name = "cancel",       .func = tap_cli_cancel_commit_job },
 };
 
 #define print_commands()					\
