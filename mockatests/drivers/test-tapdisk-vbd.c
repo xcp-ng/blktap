@@ -158,7 +158,7 @@ test_vbd_complete_block_status_request(void **stat)
 	my_treq.op = TD_OP_BLOCK_STATUS;
 	my_treq.cb = tapdisk_vbd_complete_block_status_request;
 
-	tapdisk_vbd_complete_block_status_request(my_treq, 0);
+	tapdisk_vbd_complete_block_status_request(&my_treq, 0);
 	assert_non_null(extents->head);
 	assert_int_equal(extents->head->flag, TD_BLOCK_STATE_HOLE);
 	assert_int_equal(extents->head->start, my_treq.sec);

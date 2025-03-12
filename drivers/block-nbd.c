@@ -222,7 +222,7 @@ __cancel_req(struct tdnbd_data *prv, int i, struct td_nbd_request *pos, int e)
 	list_move(&pos->queue, &prv->free_reqs);
 	prv->nr_free_count++;
 
-	td_complete_request(pos->treq, e);
+	td_complete_request(&pos->treq, e);
 }
 
 static void
@@ -368,7 +368,7 @@ disable_write_queue(struct tdnbd_data *prv)
 
 static int
 tdnbd_queue_request_locked(struct tdnbd_data *prv, int type, uint64_t offset,
-			   char *buffer, uint32_t length, td_request_t treq, int fake)
+			   char *buffer, uint32_t length, const td_request_t *treq, int fake)
 {
 	if (prv->nr_free_count == 0) 
 		return -EBUSY;
@@ -383,7 +383,7 @@ tdnbd_queue_request_locked(struct tdnbd_data *prv, int type, uint64_t offset,
 
 	/* fill in the request */
 
-	req->treq = treq;
+	req->treq = *treq;
 
 	unsigned int id = prv->handle_id;
 	prv->handle_id = (prv->handle_id + 1) % 0x100000;
@@ -415,7 +415,7 @@ tdnbd_queue_request_locked(struct tdnbd_data *prv, int type, uint64_t offset,
 
 static int
 tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
-		    char *buffer, uint32_t length, td_request_t treq, int fake)
+		    char *buffer, uint32_t length, const td_request_t* treq, int fake)
 {
 	int rc;
 
@@ -490,11 +490,11 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 
 		// FIXME: should we unlock around that call ?
 		// FIXME2: check that td_complete_request is thread-safe
-		td_complete_request(prv->curr_reply_req->treq, 0);
+		td_complete_request(&prv->curr_reply_req->treq, 0);
 
 		break;
 	case TAPDISK_NBD_CMD_WRITE:
-		td_complete_request(prv->curr_reply_req->treq, 0);
+		td_complete_request(&prv->curr_reply_req->treq, 0);
 
 		break;
 	default:
@@ -1074,27 +1074,27 @@ tdnbd_close(td_driver_t* driver)
 }
 
 static void
-tdnbd_queue_read(td_driver_t* driver, td_request_t treq)
+tdnbd_queue_read(td_driver_t* driver, const td_request_t *treq)
 {
 	struct tdnbd_data *prv = (struct tdnbd_data *)driver->data;
-	int      size    = treq.secs * driver->info.sector_size;
-	uint64_t offset  = treq.sec * (uint64_t)driver->info.sector_size;
+	int      size    = treq->secs * driver->info.sector_size;
+	uint64_t offset  = treq->sec * (uint64_t)driver->info.sector_size;
 
 	if (prv->flags & TD_OPEN_SECONDARY)
 		td_forward_request(treq);       /* TODO: check that this function is thread-safe */
 	else
-		tdnbd_queue_request(prv, TAPDISK_NBD_CMD_READ, offset, treq.buf, size,
+		tdnbd_queue_request(prv, TAPDISK_NBD_CMD_READ, offset, treq->buf, size,
 				treq, 0);
 }
 
 static void
-tdnbd_queue_write(td_driver_t* driver, td_request_t treq)
+tdnbd_queue_write(td_driver_t* driver, const td_request_t *treq)
 {
 	struct tdnbd_data *prv = (struct tdnbd_data *)driver->data;
-	int      size    = treq.secs * driver->info.sector_size;
-	uint64_t offset  = treq.sec * (uint64_t)driver->info.sector_size;
+	int      size    = treq->secs * driver->info.sector_size;
+	uint64_t offset  = treq->sec * (uint64_t)driver->info.sector_size;
 
-	tdnbd_queue_request(prv, TAPDISK_NBD_CMD_WRITE, offset, treq.buf, size,
+	tdnbd_queue_request(prv, TAPDISK_NBD_CMD_WRITE, offset, treq->buf, size,
 			    treq, 0);
 }
 

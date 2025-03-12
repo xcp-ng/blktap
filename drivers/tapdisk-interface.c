@@ -156,7 +156,7 @@ td_validate_parent(td_image_t *image, td_image_t *parent)
 }
 
 void
-td_queue_write(td_image_t *image, td_request_t treq)
+td_queue_write(td_image_t *image, const td_request_t *treq)
 {
 	int err;
 	td_driver_t *driver;
@@ -182,9 +182,9 @@ td_queue_write(td_image_t *image, td_request_t treq)
 	if (err)
 		goto fail;
 
-	td_queue_id_t __unused qid = treq.vreq->vqueue - treq.vreq->vqueue->vbd->queues;
+	td_queue_id_t __unused qid = treq->vreq->vqueue - treq->vreq->vqueue->vbd->queues;
 	tracepoint(tapdisk, driver_queue,
-		qid, treq.vreq->req_id, treq.op, treq.sec, treq.secs);
+		qid, treq->vreq->req_id, treq->op, treq->sec, treq->secs);
 
 	driver->ops->td_queue_write(driver, treq);
 
@@ -195,7 +195,7 @@ fail:
 }
 
 void
-td_queue_read(td_image_t *image, td_request_t treq)
+td_queue_read(td_image_t *image, const td_request_t *treq)
 {
 	int err;
 	td_driver_t *driver;
@@ -221,9 +221,9 @@ td_queue_read(td_image_t *image, td_request_t treq)
 	if (err)
 		goto fail;
 
-	td_queue_id_t __unused qid = treq.vreq->vqueue - treq.vreq->vqueue->vbd->queues;
+	td_queue_id_t __unused qid = treq->vreq->vqueue - treq->vreq->vqueue->vbd->queues;
 	tracepoint(tapdisk, driver_queue,
-		qid, treq.vreq->req_id, treq.op, treq.sec, treq.secs);
+		qid, treq->vreq->req_id, treq->op, treq->sec, treq->secs);
 
 	driver->ops->td_queue_read(driver, treq);
 
@@ -256,16 +256,16 @@ td_queue_block_status(td_image_t *image, td_request_t *treq)
 		goto fail;
 	}
 
-	err = tapdisk_image_check_td_request(image, *treq);
+	err = tapdisk_image_check_td_request(image, treq);
 	if (err)
 		goto fail;
 
-	driver->ops->td_queue_block_status(driver, *treq);
+	driver->ops->td_queue_block_status(driver, treq);
 
 	return;
 
 fail:
-	td_complete_request(*treq, err);
+	td_complete_request(treq, err);
 }
 
 int
@@ -344,18 +344,18 @@ td_cancel_commit_job(td_image_t *image, bool wait)
 }
 
 void
-td_forward_request(td_request_t treq)
+td_forward_request(const td_request_t *treq)
 {
 	tapdisk_vbd_forward_request(treq);
 }
 
 int
-td_complete_request(td_request_t treq, int res)
+td_complete_request(const td_request_t *treq, int res)
 {
-	td_queue_id_t __unused qid = treq.vreq->vqueue - treq.vreq->vqueue->vbd->queues;
+	td_queue_id_t __unused qid = treq->vreq->vqueue - treq->vreq->vqueue->vbd->queues;
 	tracepoint(tapdisk, driver_complete,
-		   qid, treq.vreq->req_id, treq.op, treq.sec, treq.secs/*, res*/);
-	return treq.cb(treq, res);
+		   qid, treq->vreq->req_id, treq->op, treq->sec, treq->secs/*, res*/);
+	return treq->cb(treq, res);
 }
 
 void

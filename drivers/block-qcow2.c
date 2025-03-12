@@ -922,7 +922,7 @@ signal_completion(struct qcow2_request *r)
 	}
 	pthread_mutex_unlock(&s->lock);
 
-	notify = td_complete_request(r->treq, r->error);
+	notify = td_complete_request(&r->treq, r->error);
 	DBG(TLOG_DBG, "lsec: 0x%08"PRIx64", blk: 0x%04x, "
 		"err: %d\n", r->treq.sec, r->treq.secs, r->error);
 	/* Also on error: the generic wake-up of remote completions skips qcow2 */
@@ -1117,7 +1117,7 @@ do_aio_write(struct qcow2_state *s, struct qcow2_request *req)
 }
 
 static int
-schedule_request(struct qcow2_state *s, td_request_t *treq, enum qcow2_ops op)
+schedule_request(struct qcow2_state *s, const td_request_t *treq, enum qcow2_ops op)
 {
 	static uint32_t queue_nr;
 	struct qcow2_queue *q = &s->queue[((queue_nr++) % QCOW2_QUEUE_COUNT)];
@@ -1148,7 +1148,7 @@ schedule_request(struct qcow2_state *s, td_request_t *treq, enum qcow2_ops op)
 }
 
 static void
-qcow2_queue(td_driver_t *driver, td_request_t *treq, int op)
+qcow2_queue(td_driver_t *driver, const td_request_t *treq, int op)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
 	int err;
@@ -1163,19 +1163,19 @@ qcow2_queue(td_driver_t *driver, td_request_t *treq, int op)
 	return;
 fail:
 	DBG(TLOG_DBG, "request failed\n");
-	td_complete_request(*treq, err);
+	td_complete_request(treq, err);
 }
 
 static void
-qcow2_queue_read(td_driver_t *driver, td_request_t treq)
+qcow2_queue_read(td_driver_t *driver, const td_request_t *treq)
 {
-	qcow2_queue(driver, &treq, QCOW2_OP_READ);
+	qcow2_queue(driver, treq, QCOW2_OP_READ);
 }
 
 static void
-qcow2_queue_write(td_driver_t *driver, td_request_t treq)
+qcow2_queue_write(td_driver_t *driver, const td_request_t *treq)
 {
-	qcow2_queue(driver, &treq, QCOW2_OP_WRITE);
+	qcow2_queue(driver, treq, QCOW2_OP_WRITE);
 }
 
 int
