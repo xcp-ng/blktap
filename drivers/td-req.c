@@ -955,6 +955,7 @@ tapdisk_xenblkif_reqs_init(struct td_xenblkif *td_blkif)
     pthread_mutex_init(&td_blkif->mutex, NULL);
 
     td_blkif->ring_size = td_blkif_ring_size(td_blkif);
+    tlog_syslog(TLOG_INFO, "RING_SIZE %u\n", td_blkif->ring_size);
     ASSERT(td_blkif->ring_size > 0);
 
     td_blkif->reqs =
