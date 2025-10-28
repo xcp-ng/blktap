@@ -1163,6 +1163,26 @@ qcow2_debug(td_driver_t *driver)
 		s->schedule, s->kick);
 
 	print_latencies(s);
+
+	s->read_slat.max_val = s->read_slat.samples = 0;
+	s->read_slat.min_val = ULONG_MAX;
+	s->read_slat.mean = s->read_slat.S = 0.0;
+	s->read_clat.max_val = s->read_clat.samples = 0;
+	s->read_clat.min_val = ULONG_MAX;
+	s->read_clat.mean = s->read_clat.S = 0.0;
+	s->read_lat.max_val = s->read_lat.samples = 0;
+	s->read_lat.min_val = ULONG_MAX;
+	s->read_lat.mean = s->read_lat.S = 0.0;
+	s->write_slat.max_val = s->write_slat.samples = 0;
+	s->write_slat.min_val = ULONG_MAX;
+	s->write_slat.mean = s->write_slat.S = 0.0;
+	s->write_clat.max_val = s->write_clat.samples = 0;
+	s->write_clat.min_val = ULONG_MAX;
+	s->write_clat.mean = s->write_clat.S = 0.0;
+	s->write_lat.max_val = s->write_lat.samples = 0;
+	s->write_lat.min_val = ULONG_MAX;
+	s->write_lat.mean = s->write_lat.S = 0.0;
+	s->queued = s->completed = s->returned = s->reads = s->read_size = s->writes = s->write_size = s->kick = s->schedule = 0;
 #endif
 }
 
