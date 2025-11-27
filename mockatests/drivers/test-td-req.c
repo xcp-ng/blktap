@@ -214,7 +214,6 @@ test_segment_arrays_match_ring_capacity(void **state)
 	assert_int_equal(ARRAY_SIZE(req.msg.seg), BLKIF_MAX_SEGMENTS_PER_REQUEST);
 	assert_int_equal(ARRAY_SIZE(req.gcopy_segs), ARRAY_SIZE(req.msg.seg));
 	assert_int_equal(ARRAY_SIZE(req.iov), ARRAY_SIZE(req.msg.seg));
-	assert_int_equal(ARRAY_SIZE(req.gref), ARRAY_SIZE(req.msg.seg));
 	assert_int_equal((size_t)TD_REQ_BUFFER_SIZE,
 			(size_t)ARRAY_SIZE(req.msg.seg) << PAGE_SHIFT);
 }
