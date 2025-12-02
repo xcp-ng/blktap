@@ -711,14 +711,6 @@ tapdisk_xenblkif_parse_request_locked(struct td_xenblkif * const blkif,
 			blkif->vbd_stats.stats->read_sectors += nr_sect;
     } 
 
-    /*
-     * TODO Isn't this kind of expensive to do for each requests? Why does
-     * the tapdisk need this in the first place?
-     */
-    snprintf(req->name, sizeof(req->name), "xenvbd-%d-%d.%"SCNx64"",
-             blkif->domid, blkif->devid, req->msg.id);
-
-    vreq->name = req->name;
     vreq->token = blkif;
     vreq->cb = __tapdisk_xenblkif_request_cb;
 
