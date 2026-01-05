@@ -53,7 +53,7 @@ int
 tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int devid, int poll_duration,
 		int poll_idle_threshold,
 		const grant_ref_t * grefs, const int order, const evtchn_port_t port,
-		int proto, const char *pool, const int minor)
+		int proto, const char *pool_name, const int minor)
 {
     tapdisk_message_t message;
     int i, err;
@@ -71,14 +71,14 @@ tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int devid, 
     message.u.blkif.proto = proto;
     message.u.blkif.poll_duration = poll_duration;
     message.u.blkif.poll_idle_threshold = poll_idle_threshold;
-    if (pool) {
-        if (unlikely(strlen(pool) > (sizeof(message.u.blkif.pool) - 1))) {
-            EPRINTF("pool name too long: %s\n", pool);
+    if (pool_name) {
+        if (unlikely(strlen(pool_name) > (sizeof(message.u.blkif.pool_name) - 1))) {
+            EPRINTF("pool name too long: %s\n", pool_name);
             return -ENAMETOOLONG;
         }
-        safe_strncpy(message.u.blkif.pool, pool, sizeof(message.u.blkif.pool));
+        safe_strncpy(message.u.blkif.pool_name, pool_name, sizeof(message.u.blkif.pool_name));
     } else {
-        message.u.blkif.pool[0] = 0;
+        message.u.blkif.pool_name[0] = '\0';
     }
 
     err = tap_ctl_connect_send_and_receive(pid, &message, NULL);

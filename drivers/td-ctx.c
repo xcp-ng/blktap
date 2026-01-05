@@ -407,13 +407,13 @@ tapdisk_xenio_ctx_ring_event(event_id_t id __attribute__((unused)),
  * TODO The pool is ignored, we always open the default pool.
  */
 static inline int
-tapdisk_xenio_ctx_open(const char *pool)
+tapdisk_xenio_ctx_open(const char *pool_name)
 {
     struct td_xenio_ctx *ctx;
     int fd, err;
 
     /* zero-length pool names are not allowed */
-    if (pool && !strlen(pool))
+    if (pool_name && !strlen(pool_name))
         return -EINVAL;
 
     ctx = calloc(1, sizeof(*ctx));
@@ -425,8 +425,8 @@ tapdisk_xenio_ctx_open(const char *pool)
 
     ctx->ring_event = -1; /* TODO is there a special value? */
     ctx->gntdev_fd = -1;
-    ctx->pool = TD_XENBLKIF_DEFAULT_POOL;
-	INIT_LIST_HEAD(&ctx->blkifs);
+    ctx->pool_name = TD_XENBLKIF_DEFAULT_POOL;
+    INIT_LIST_HEAD(&ctx->blkifs);
     list_add(&ctx->entry, &_td_xenio_ctxs);
 
     ctx->gntdev_fd = open("/dev/xen/gntdev", O_NONBLOCK);
@@ -483,14 +483,14 @@ fail:
  * against the default pool. Note that NULL is valid pool name value.
  */
 static inline int
-__td_xenio_ctx_match(struct td_xenio_ctx * ctx, const char *pool)
+__td_xenio_ctx_match(struct td_xenio_ctx * ctx, const char *pool_name)
 {
-	if (unlikely(!pool)) {
+	if (unlikely(!pool_name)) {
 		assert(TD_XENBLKIF_DEFAULT_POOL);
-		return !strcmp(ctx->pool, TD_XENBLKIF_DEFAULT_POOL);
+		return !strcmp(ctx->pool_name, TD_XENBLKIF_DEFAULT_POOL);
 	}
 
-	return !strcmp(ctx->pool, pool);
+	return !strcmp(ctx->pool_name, pool_name);
 }
 
 #define tapdisk_xenio_find_ctx(_ctx, _cond)	\
@@ -507,19 +507,19 @@ __td_xenio_ctx_match(struct td_xenio_ctx * ctx, const char *pool)
 	} while (0)
 
 int
-tapdisk_xenio_ctx_get(const char *pool, struct td_xenio_ctx ** _ctx)
+tapdisk_xenio_ctx_get(const char *pool_name, struct td_xenio_ctx ** _ctx)
 {
     struct td_xenio_ctx *ctx;
     int err = 0;
 
     do {
-        tapdisk_xenio_find_ctx(ctx, __td_xenio_ctx_match(ctx, pool));
+        tapdisk_xenio_find_ctx(ctx, __td_xenio_ctx_match(ctx, pool_name));
         if (ctx) {
             *_ctx = ctx;
             return 0;
         }
 
-        err = tapdisk_xenio_ctx_open(pool);
+        err = tapdisk_xenio_ctx_open(pool_name);
     } while (!err);
 
     return err;

@@ -42,7 +42,7 @@ tapdisk_xenblkif_stats(struct td_xenblkif * blkif, td_stats_t * st)
     ASSERT(st);
     ASSERT(blkif->ctx);
 
-    tapdisk_stats_field(st, "pool", "s", blkif->ctx->pool);
+    tapdisk_stats_field(st, "pool", "s", blkif->ctx->pool_name);
     tapdisk_stats_field(st, "domid", "d", blkif->domid);
     tapdisk_stats_field(st, "devid", "d", blkif->devid);
 

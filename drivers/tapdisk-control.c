@@ -1201,7 +1201,7 @@ tapdisk_control_xenblkif_connect(
     tapdisk_message_blkif_t *blkif;
 
     td_vbd_t *vbd = NULL;
-    const char *pool;
+    const char *pool_name;
     size_t len;
     int err;
 	int minor = -1;
@@ -1219,20 +1219,20 @@ tapdisk_control_xenblkif_connect(
     }
 
     blkif = &request->u.blkif;
-    len = strnlen(blkif->pool, sizeof(blkif->pool));
+    len = strnlen(blkif->pool_name, sizeof(blkif->pool_name));
     if (!len)
-        pool = NULL;
-    else if (len >= sizeof(blkif->pool)) {
+        pool_name = NULL;
+    else if (len >= sizeof(blkif->pool_name)) {
         err = -EINVAL;
 		goto out;
     } else
-        pool = blkif->pool;
+        pool_name = blkif->pool_name;
 
     DPRINTF("connecting VBD %d domid=%d, devid=%d, pool %s, evt %d, poll duration %d, poll idle threshold %d\n",
-            vbd->uuid, blkif->domid, blkif->devid, pool, blkif->port, blkif->poll_duration, blkif->poll_idle_threshold);
+            vbd->uuid, blkif->domid, blkif->devid, pool_name, blkif->port, blkif->poll_duration, blkif->poll_idle_threshold);
 
     err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid, blkif->gref,
-            blkif->order, blkif->port, blkif->proto, blkif->poll_duration, blkif->poll_idle_threshold, pool, vbd);
+            blkif->order, blkif->port, blkif->proto, blkif->poll_duration, blkif->poll_idle_threshold, pool_name, vbd);
 
 out:
 	response->cookie = request->cookie;

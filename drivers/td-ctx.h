@@ -50,7 +50,7 @@
  * unnecessary.
  */
 struct td_xenio_ctx {
-    char *pool; /* TODO rename to pool_name */
+    char *pool_name;
 
     /**
      * Handle to the grant table driver.
@@ -88,7 +88,7 @@ struct td_xenio_ctx {
  * @returns 0 on success, -errno on error
  */
 int
-tapdisk_xenio_ctx_get(const char *pool, struct td_xenio_ctx ** _ctx);
+tapdisk_xenio_ctx_get(const char *pool_name, struct td_xenio_ctx ** _ctx);
 
 /**
  * Releases the pool, only if there is no block interface using it.

@@ -146,9 +146,9 @@ typedef struct tapdisk_message_blkif {
 	uint32_t proto;
 
 	/**
-	 * TODO Page pool? Can be NULL.
+	 * Page pool name? Can be empty (ie "")
 	 */
-	char pool[TAPDISK_MESSAGE_STRING_LENGTH];
+	char pool_name[TAPDISK_MESSAGE_STRING_LENGTH];
 
 	/**
 	 * The event channel port.
