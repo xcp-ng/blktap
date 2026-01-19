@@ -300,7 +300,7 @@ xenio_blkif_put_response(struct td_blkif_queue * const queue,
         RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
         if (notify) {
             struct td_xenblkif* const blkif = queue->blkif;
-            int err = xenevtchn_notify(blkif->ctx->xce_handle, queue->port);
+            int err = xenevtchn_notify(queue->ctx->xce_handle, queue->ctx->port);
             if (err < 0) {
                 err = -errno;
                 if (req) {
@@ -351,15 +351,15 @@ blkif_rq_data(blkif_request_t const * const msg)
 
 
 static int
-guest_copy2(struct td_xenblkif * const blkif,
-        struct td_xenblkif_req * const req) {
-
+guest_copy2(struct td_xenblkif * const blkif, const struct td_xenio_shared_ctx* ctx,
+        struct td_xenblkif_req * const req)
+{
     int i = 0;
     long err = 0;
     struct ioctl_gntdev_grant_copy gcopy;
 
     ASSERT(blkif);
-    ASSERT(blkif->ctx);
+    ASSERT(ctx);
     ASSERT(req);
     ASSERT(blkif_rq_data(&req->msg));
     ASSERT(req->msg.nr_segments > 0);
@@ -394,7 +394,7 @@ guest_copy2(struct td_xenblkif * const blkif,
     gcopy.count = req->msg.nr_segments;
     gcopy.segments = req->gcopy_segs;
 
-    err = -ioctl(blkif->ctx->gntdev_fd, IOCTL_GNTDEV_GRANT_COPY, &gcopy);
+    err = -ioctl(ctx->gntdev_fd, IOCTL_GNTDEV_GRANT_COPY, &gcopy);
     if (err) {
         err = -errno;
         RING_ERR(blkif, "failed to grant-copy request %"PRIu64" "
@@ -493,7 +493,7 @@ tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 			blkif->vbd_stats.stats->read_reqs_completed++;
 			ticks = &blkif->vbd_stats.stats->read_total_ticks;
 			if (likely(!err)) {
-				_err = guest_copy2(blkif, req);
+				_err = guest_copy2(blkif, queue->ctx->shared, req);
 				if (unlikely(_err)) {
 					err = _err;
 					RING_ERR(blkif, "req %lu: failed to copy from/to guest: "
@@ -706,7 +706,7 @@ tapdisk_xenblkif_parse_request_locked(struct td_blkif_queue* const queue,
     vreq->sec = req->msg.sector_number;
 
     if (blkif_rq_wr(&req->msg)) {
-        err = guest_copy2(blkif, req);
+        err = guest_copy2(blkif, queue->ctx->shared, req);
         if (err) {
             RING_ERR(blkif, "req %lu: failed to copy from guest: %s\n",
                     req->msg.id, strerror(-err));

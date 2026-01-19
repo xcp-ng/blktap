@@ -32,6 +32,7 @@
 #include "td-ctx.h"
 #include "tapdisk-log.h"
 #include "timeout-math.h"
+#include "util.h"
 
 #define ERROR(_f, _a...)           tlog_syslog(TLOG_WARN, "td-ctx: " _f, ##_a)
 
@@ -41,20 +42,10 @@ struct list_head _td_xenio_ctxs = LIST_HEAD_INIT(_td_xenio_ctxs);
  * TODO releases a pool?
  */
 static void
-tapdisk_xenio_ctx_close(struct td_xenio_ctx * const ctx)
+tapdisk_xenio_shared_ctx_close(struct td_xenio_shared_ctx * const ctx)
 {
-    if (!ctx)
+    if (!ctx || ctx->count_ref)
         return;
-
-    if (ctx->ring_event >= 0) {
-        tapdisk_server_unregister_event(ctx->ring_event);
-        ctx->ring_event = -1;
-    }
-
-    if (ctx->xce_handle) {
-        xenevtchn_close(ctx->xce_handle);
-        ctx->xce_handle = NULL;
-    }
 
     if (ctx->xcg_handle) {
         xengnttab_close(ctx->xcg_handle);
@@ -69,57 +60,6 @@ tapdisk_xenio_ctx_close(struct td_xenio_ctx * const ctx)
     list_del(&ctx->entry);
 
     free(ctx);
-}
-
-/*
- * XXX only called by tapdisk_xenio_ctx_ring_event
- */
-static inline struct td_blkif_queue *
-xenio_pending_queue(struct td_xenio_ctx * const ctx)
-{
-    xenevtchn_port_or_error_t port;
-    struct td_xenblkif *blkif;
-    int i, err;
-
-    ASSERT(ctx);
-
-    /*
-     * Get the local port for which there is a pending event.
-     */
-    port = xenevtchn_pending(ctx->xce_handle);
-    if (port == -1) {
-        /* TODO log error */
-        return NULL;
-    }
-
-    /*
-     * Find the block interface with that local port.
-     */
-    /* HACK: this should temporary */
-    tapdisk_xenio_ctx_find_blkif(ctx, blkif,
-				 ((blkif->nr_queues > 0 && blkif->queues[0].port == port) ||
-				  (blkif->nr_queues > 1 && blkif->queues[1].port == port) ||
-				  (blkif->nr_queues > 2 && blkif->queues[2].port == port) ||
-				  (blkif->nr_queues > 3 && blkif->queues[3].port == port)));
-    if (blkif) {
-        err = xenevtchn_unmask(ctx->xce_handle, port);
-        if (err) {
-            /* TODO log error */
-            return NULL;
-        }
-    }
-
-    /*
-     * TODO Is it possible to have an pending event channel but no block
-     * interface associated with it?
-     */
-
-    for (i = 0; blkif && i < blkif->nr_queues; i++) {
-	if (blkif->queues[i].port == port)
-	    return &blkif->queues[i];
-    }
-
-    return NULL;
 }
 
 #define blkif_get_req(dst, src)                 \
@@ -384,13 +324,24 @@ static inline void
 tapdisk_xenio_ctx_ring_event(event_id_t id __attribute__((unused)),
         char mode __attribute__((unused)), void *private)
 {
-    struct td_xenio_ctx *ctx = private;
-    struct td_blkif_queue *queue = NULL;
+    struct td_blkif_queue *queue = private;
 
-    ASSERT(ctx);
+    ASSERT(queue);
 
-    queue = xenio_pending_queue(ctx);
-    if (!queue) {
+    xenevtchn_port_or_error_t port;
+    int err;
+
+    /*
+     * Get the local port for which there is a pending event.
+     */
+    port = xenevtchn_pending(queue->ctx->xce_handle);
+    if (port == -1) {
+        /* TODO log error */
+        return;
+    }
+
+    err = xenevtchn_unmask(queue->ctx->xce_handle, port);
+    if (err) {
         /* TODO log error */
         return;
     }
@@ -413,10 +364,10 @@ tapdisk_xenio_ctx_ring_event(event_id_t id __attribute__((unused)),
  * TODO The pool is ignored, we always open the default pool.
  */
 static inline int
-tapdisk_xenio_ctx_open(const char *pool_name)
+tapdisk_xenio_shared_ctx_open(const char *pool_name)
 {
-    struct td_xenio_ctx *ctx;
-    int fd, err;
+    struct td_xenio_shared_ctx *ctx;
+    int err;
 
     /* zero-length pool names are not allowed */
     if (pool_name && !strlen(pool_name))
@@ -429,7 +380,7 @@ tapdisk_xenio_ctx_open(const char *pool_name)
         goto fail;
     }
 
-    ctx->ring_event = -1; /* TODO is there a special value? */
+    ctx->count_ref = 0;
     ctx->gntdev_fd = -1;
     ctx->pool_name = TD_XENBLKIF_DEFAULT_POOL;
     INIT_LIST_HEAD(&ctx->blkifs);
@@ -442,14 +393,6 @@ tapdisk_xenio_ctx_open(const char *pool_name)
         goto fail;
     }
 
-    ctx->xce_handle = xenevtchn_open(NULL, 0);
-    if (!ctx->xce_handle) {
-        err = -errno;
-        ERROR("failed to open the event channel driver: %s\n",
-                strerror(-err));
-        goto fail;
-    }
-
     ctx->xcg_handle = xengnttab_open(NULL, 0);
     if (!ctx->xcg_handle) {
         err = -errno;
@@ -458,26 +401,10 @@ tapdisk_xenio_ctx_open(const char *pool_name)
         goto fail;
     }
 
-    fd = xenevtchn_fd(ctx->xce_handle);
-    if (fd < 0) {
-        err = -errno;
-        ERROR("failed to get the event channel file descriptor: %s\n",
-                strerror(-err));
-        goto fail;
-    }
-
-    ctx->ring_event = tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
-                                                    fd, TV_ZERO, tapdisk_xenio_ctx_ring_event, ctx);
-    if (ctx->ring_event < 0) {
-        err = ctx->ring_event;
-        ERROR("failed to register event: %s\n", strerror(-err));
-        goto fail;
-    }
-
     return 0;
 
 fail:
-    tapdisk_xenio_ctx_close(ctx);
+    tapdisk_xenio_shared_ctx_close(ctx);
     return err;
 }
 
@@ -489,7 +416,7 @@ fail:
  * against the default pool. Note that NULL is valid pool name value.
  */
 static inline int
-__td_xenio_ctx_match(struct td_xenio_ctx * ctx, const char *pool_name)
+__td_xenio_ctx_match(struct td_xenio_shared_ctx * ctx, const char *pool_name)
 {
         if (unlikely(!pool_name)) {
                 assert(TD_XENBLKIF_DEFAULT_POOL);
@@ -513,9 +440,9 @@ __td_xenio_ctx_match(struct td_xenio_ctx * ctx, const char *pool_name)
     } while (0)
 
 int
-tapdisk_xenio_ctx_get(const char *pool_name, struct td_xenio_ctx ** _ctx)
+tapdisk_xenio_shared_ctx_get(const char *pool_name, struct td_xenio_shared_ctx ** _ctx)
 {
-    struct td_xenio_ctx *ctx;
+    struct td_xenio_shared_ctx *ctx;
     int err = 0;
 
     do {
@@ -525,15 +452,106 @@ tapdisk_xenio_ctx_get(const char *pool_name, struct td_xenio_ctx ** _ctx)
             return 0;
         }
 
-        err = tapdisk_xenio_ctx_open(pool_name);
+        err = tapdisk_xenio_shared_ctx_open(pool_name);
     } while (!err);
 
     return err;
 }
 
 void
-tapdisk_xenio_ctx_put(struct td_xenio_ctx * ctx)
+tapdisk_xenio_shared_ctx_put(struct td_xenio_shared_ctx * ctx)
 {
     if (list_empty(&ctx->blkifs))
-        tapdisk_xenio_ctx_close(ctx);
+        tapdisk_xenio_shared_ctx_close(ctx);
+}
+
+struct td_xenio_ctx*
+tapdisk_xenio_ctx_bind_queue(struct td_xenio_shared_ctx * shared_ctx,
+                             evtchn_port_t port,
+                             struct td_blkif_queue* queue)
+{
+    int fd = -1;
+    int err = 0;
+    int ret = -1;
+    xenevtchn_handle* evthdl = NULL;
+    event_id_t ring_event = -1;
+
+    evthdl = xenevtchn_open(NULL, 0);
+    if (!evthdl) {
+        err = -errno;
+        ERROR("failed to open the event channel driver: %s\n",
+                strerror(-err));
+        goto fail;
+    }
+
+    fd = xenevtchn_fd(evthdl);
+    if (fd < 0) {
+        err = -errno;
+        ERROR("failed to get the event channel file descriptor: %s\n",
+                strerror(-err));
+        goto fail;
+    }
+
+    ring_event = tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
+                                               fd, TV_ZERO, tapdisk_xenio_ctx_ring_event, queue);
+    if (ring_event < 0) {
+        err = ring_event;
+        ERROR("failed to register event: %s\n", strerror(-err));
+        goto fail;
+    }
+
+    ret = xenevtchn_bind_interdomain(evthdl, queue->blkif->domid, port);
+    if (ret == -1) {
+            err = -errno;
+            RING_ERR(queue->blkif, "failed to bind to event channel port %d: %s\n",
+                     port, strerror(-err));
+            goto fail;
+    }
+
+    struct td_xenio_ctx* ctx = calloc(1, sizeof(struct td_xenio_ctx));
+    if (!ctx) {
+        goto fail;
+    }
+
+    ctx->shared = shared_ctx;
+    shared_ctx->count_ref++;
+
+    ctx->xce_handle = evthdl;
+    ctx->ring_event = ring_event;
+    ctx->fd = fd;
+    ctx->port = ret;   // XXX: we do not store the port in argument ?
+
+    return ctx;
+
+fail:
+    if (ring_event >= 0)
+        tapdisk_server_unregister_event(ring_event);
+    if (ret != -1)
+        xenevtchn_unbind(evthdl, ret);
+    if (evthdl)
+        xenevtchn_close(evthdl); // also close owned 'fd'
+
+    return NULL;
+}
+
+void
+tapdisk_xenio_ctx_unbind_queue(struct td_xenio_ctx* ctx)
+{
+    if (ctx->ring_event >= 0) {
+        tapdisk_server_unregister_event(ctx->ring_event);
+        ctx->ring_event = -1;
+        ctx->fd = -1;
+    }
+
+    if (ctx->xce_handle) {
+        xenevtchn_close(ctx->xce_handle);
+        ctx->xce_handle = NULL;
+    }
+
+    ctx->port = -1;
+
+    ASSERT(ctx->shared->count_ref > 0);
+    ctx->shared->count_ref--;
+
+    free(ctx);
 }

@@ -55,11 +55,6 @@ struct td_xenblkif {
     int devid;
 
     /**
-     * Pointer to the context this block interface belongs to.
-     */
-    struct td_xenio_ctx *ctx;
-
-    /**
      * allows struct td_blkif's to be linked into lists, for whomever needs to
      * maintain multiple struct td_blkif's
      */
@@ -82,16 +77,9 @@ struct td_xenblkif {
         blkif_back_rings_t rings;
 
         /**
-         * The local port corresponding to the remote port of the domain where the
-         * front-end is running. We use this to tell for which VBD a pending event
-         * is, and for notifying the front-end for responses we have produced and
-         * placed in the shared ring.
+         * Pointer to the context this block interface belongs to.
          */
-        /*
-         * FIXME shoud be evtchn_port_or_error_t, which is declared in
-         * xenctrl.h. Including xenctrl.h conflicts with xen_blkif.h.
-         */
-        int port;
+        struct td_xenio_ctx *ctx;
 
         /**
          * Grant references of the ring that holds the request descriptors.
@@ -220,10 +208,6 @@ struct td_xenblkif {
     EPRINTF("%d/%d, ring=%p: "fmt, (blkif)->domid, (blkif)->devid, (blkif), \
         ##args);
 
-/* TODO rename from xenio */
-#define tapdisk_xenio_for_each_ctx(_ctx) \
-	list_for_each_entry(_ctx, &_td_xenio_ctxs, entry)
-
 /**
  * Connects the tapdisk to the shared ring.
  *
@@ -287,7 +271,7 @@ tapdisk_xenblkif_find(const domid_t domid, const int devid);
  * shared as well.
  */
 extern event_id_t
-tapdisk_xenblkif_evtchn_event_id(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_evtchn_event_id(const struct td_blkif_queue *queue);
 
 /**
  * Returns the event ID associated wit checking the ring. This is a private
@@ -370,5 +354,13 @@ tapdisk_xenblkif_unsched_chkrng(const struct td_blkif_queue *queue);
 bool
 tapdisk_xenblkif_barrier_should_complete(
 		const struct td_blkif_queue * const queue);
+
+/*
+ * Return index of the queue
+ */
+static inline unsigned int
+tapdisk_xenblkif_queue_id(const struct td_blkif_queue* queue) {
+    return queue - queue->blkif->queues;
+}
 
 #endif /* __TD_BLKIF_H__ */
