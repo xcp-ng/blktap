@@ -126,7 +126,7 @@ tapdisk_xenio_ctx_bind_queue(struct td_xenio_shared_ctx* ctx, evtchn_port_t port
  * TODO: find a better naming, or split the function.
  */
 void
-tapdisk_xenio_ctx_unbind_queue(struct td_xenio_ctx* ctx);
+tapdisk_xenio_ctx_unbind_queue(struct td_xenio_ctx* ctx, struct td_blkif_queue* queue);
 
 /**
  * List of contexts.

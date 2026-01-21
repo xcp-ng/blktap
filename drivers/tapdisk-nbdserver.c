@@ -1335,7 +1335,7 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 		goto fail;
 	}
 
-	rc = tapdisk_vbd_queue_request(server->vbd, vreq);
+	rc = tapdisk_vbd_queue_request(server->vbd, vreq, true); // TODO: suboptimal final argument
 	if (rc) {
 		ERR("tapdisk_vbd_queue_request failed: %d", rc);
 		goto fail;

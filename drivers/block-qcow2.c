@@ -305,6 +305,8 @@ qcow2_open(void *opaque)
 	name = s->name;
 	flags = s->flags;
 
+        qemu_thread_naming(true);
+
 	err = qcow2_initialize(s, &local_err);
 	if (err) {
 		error_report("Initialization error: %s", error_get_pretty(local_err));

@@ -404,7 +404,7 @@ tapdisk_blktap_get_requests(td_blktap_t *tap)
 			goto fail_ring;
 		}
 
-		err = tapdisk_vbd_queue_request(tap->vbd, &req->vreq);
+		err = tapdisk_vbd_queue_request(tap->vbd, &req->vreq, (rc+1 == rp));
 		if (err)
 			tapdisk_blktap_complete_request(tap, req, err, 1);
 	}
@@ -555,7 +555,7 @@ __tapdisk_blktap_close(td_blktap_t *tap)
 	 */
         int err;
 	if (tap->event_id >= 0) {
-		tapdisk_server_unregister_event(tap->event_id);
+		tapdisk_server_unregister_io_event(0, tap->event_id);
 		tap->event_id = -1;
 	}
 
@@ -620,7 +620,8 @@ tapdisk_blktap_open(const char *devname, td_vbd_t *vbd, td_blktap_t **_tap)
             goto fail;
 
 	tap->event_id =
-		tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
+		tapdisk_server_register_io_event(0,  /* Queue ID 0 */
+					      SCHEDULER_POLL_READ_FD,
 					      tap->fd, TV_ZERO,
 					      tapdisk_blktap_fd_event,
 					      tap);

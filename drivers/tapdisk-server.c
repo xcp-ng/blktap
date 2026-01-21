@@ -43,6 +43,7 @@
 #include "tapdisk-log.h"
 #include "td-blkif.h"
 #include "timeout-math.h"
+#include "util.h"
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -64,6 +65,19 @@ typedef struct tapdisk_server {
 	char                        *name;
 	char                        *ident;
 	int                          facility;
+	event_id_t                   wake_event;
+	int                          wake_event_fd;
+	uint64_t                     wake_event_count;
+
+	/* IO threads states */
+	struct {
+		pthread_t            tid;
+		char                 name[16];
+		event_id_t           eventid;
+		int                  eventfd;
+		uint64_t             eventfd_count;
+		scheduler_t          scheduler;
+	} io_threads[TAPDISK_MAX_VBD_THREADS];
 
 	/* Memory mode state */
 	struct {
@@ -227,6 +241,83 @@ tapdisk_server_set_max_timeout(int seconds)
 	scheduler_set_max_timeout(&server.scheduler, TV_SECS(seconds));
 }
 
+void tapdisk_server_io_thread_wake(td_queue_id_t qid)
+{
+	int n;
+
+	server.io_threads[qid].eventfd_count++;
+	n = write(server.io_threads[qid].eventfd,
+		  &server.io_threads[qid].eventfd_count,
+		  sizeof(server.io_threads[qid].eventfd_count));
+	ASSERT(n == 8);
+}
+
+void tapdisk_server_io_thread_handler(event_id_t id, char mode __attribute__((unused)), void *private)
+{
+	long qid = (long)private;
+	uint64_t w = 0;
+	int err;
+
+	err = read(server.io_threads[qid].eventfd, &w, sizeof(w));
+	ASSERT(err == 8);
+}
+
+event_id_t
+tapdisk_server_register_io_event(td_queue_id_t qid, char mode, int fd,
+				 struct timeval timeout, event_cb_t cb, void *data)
+{
+	event_id_t eid;
+
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	eid =  scheduler_register_event(&server.io_threads[qid].scheduler,
+					mode, fd, timeout, cb, data);
+
+	/* Wake thread to use the newly registered event */
+	tapdisk_server_io_thread_wake(qid);
+
+	return eid;
+}
+
+void
+tapdisk_server_unregister_io_event(td_queue_id_t qid, event_id_t event)
+{
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	return scheduler_unregister_event(&server.io_threads[qid].scheduler, event);
+}
+
+void
+tapdisk_server_mask_io_event(td_queue_id_t qid, event_id_t event, int masked)
+{
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	return scheduler_mask_event(&server.io_threads[qid].scheduler, event, masked);
+}
+
+void
+tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int seconds)
+{
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	scheduler_set_max_timeout(&server.io_threads[qid].scheduler, TV_SECS(seconds));
+}
+
+void
+tapdisk_server_scheduler_wake(void)
+{
+	int n;
+	server.wake_event_count++;
+	n = write(server.wake_event_fd,
+		  &server.wake_event_count,
+		  sizeof(server.wake_event_count));
+	ASSERT(n == 8);
+}
+
+static void
+tapdisk_server_scheduler_wake_handler(event_id_t id, char mode __attribute__((unused)), void *private)
+{
+	uint64_t cnt;
+	int n;
+	n = read(server.wake_event_fd, &cnt, sizeof(cnt));
+	ASSERT(n == 8);
+}
 static void
 tapdisk_server_assert_locks(void)
 {
@@ -243,6 +334,13 @@ tapdisk_server_set_retry_timeout(void)
 			tapdisk_server_set_max_timeout(TD_VBD_RETRY_INTERVAL);
 			return;
 		}
+}
+
+static void
+tapdisk_server_set_io_retry_timeout(int qid)
+{
+	// Do nothing because, retry is related to new failed and failed
+	// list which are handled in main thread
 }
 
 static void
@@ -385,6 +483,32 @@ tapdisk_server_close(void)
 
 	tapdisk_server_close_tlog();
 	tapdisk_server_close_aio();
+}
+
+void
+tapdisk_io_iterate(td_queue_id_t qid)
+{
+	int ret;
+
+	tapdisk_server_set_io_retry_timeout(qid);
+
+	ret = scheduler_wait_for_events(&server.io_threads[qid].scheduler);
+	if (ret < 0)
+		DBG(TLOG_WARN, "server wait returned %s\n", strerror(-ret));
+
+}
+
+static void*
+__tapdisk_io_thread_run(void* arg)
+{
+	td_queue_id_t  qid = (unsigned long)arg;
+
+	/* TODO: maybe use something else ?
+	         threads should be stopped before main loop */
+	for(;;)
+		tapdisk_io_iterate(qid);
+
+	return NULL;
 }
 
 void
@@ -754,6 +878,11 @@ tapdisk_server_initialize_cpumond_client(void)
 	return 0;
 }
 
+static void
+tapdisk_server_io_dummy(event_id_t id, char mode, void *private)
+{
+}
+
 int
 tapdisk_server_init(void)
 {
@@ -770,8 +899,16 @@ tapdisk_server_init(void)
 
 	server.tlog_reopen_evid = -1;
 	server.signal_handler_evid = -1;
+	server.wake_event = -1;
+	server.wake_event_fd = -1;
 
 	scheduler_initialize(&server.scheduler);
+
+	for (int qid = 0; qid < ARRAY_SIZE(server.io_threads); qid++) {
+		server.io_threads[qid].tid = 0;   /* XXX: not portable; but practical... */
+		server.io_threads[qid].eventfd = -1;
+		scheduler_initialize(&server.io_threads[qid].scheduler);
+	}
 
 	if ((ret = tapdisk_server_initialize_lowmem_mode()) < 0) {
 		EPRINTF("Failed to initialize low memory handler: %s\n",
@@ -795,6 +932,7 @@ int
 tapdisk_server_complete(void)
 {
 	int err;
+
 	server.rw_backend = get_libaio_backend();
 	server.ro_backend = get_libaio_backend();
 
@@ -806,11 +944,70 @@ tapdisk_server_complete(void)
 	if (err)
 		goto fail;
 
+	for (int qid = 0; qid < ARRAY_SIZE(server.io_threads); qid++) {
+		pthread_t tid;
+		int fd;
+
+		fd = eventfd(0, 0);
+		if (fd < 0) {
+			EPRINTF("Failed to create eventfd: %s\n", strerror(errno));
+			goto fail;
+		}
+		server.io_threads[qid].eventfd = fd;
+		server.io_threads[qid].eventfd_count = 0;
+
+		int event = scheduler_register_event(&server.io_threads[qid].scheduler,
+						     SCHEDULER_POLL_READ_FD,
+						     server.io_threads[qid].eventfd,
+						     TV_INF,
+						     tapdisk_server_io_thread_handler,
+						     (void*)(long)qid);
+		//scheduler_mask_event(&server.io_threads[qid].scheduler, event, false);
+		server.io_threads[qid].eventid = event;
+
+		err = pthread_create(&tid , NULL, __tapdisk_io_thread_run, (void*)(unsigned long)qid);
+		if (err) {
+			EPRINTF("Failed to create IO thread #%d\n", qid);
+			goto fail;
+		}
+		server.io_threads[qid].tid = tid;
+
+		snprintf(server.io_threads[qid].name,
+			 sizeof(server.io_threads[qid].name), "td-queue-%d", qid);
+		pthread_setname_np(tid, server.io_threads[qid].name);
+
+		/* HACK: just to wake up the IO thread */
+		err = tapdisk_server_register_event(SCHEDULER_POLL_TIMEOUT, -1,
+						    TV_USECS(500000),
+						    tapdisk_server_io_dummy, (void*)(long)qid);
+	}
+
+	server.wake_event_fd = eventfd(0, 0);
+	server.wake_event_count = 0;
+	ASSERT(server.wake_event_fd >= 0);
+
+	server.wake_event = scheduler_register_event(&server.scheduler,
+						     SCHEDULER_POLL_READ_FD,
+						     server.wake_event_fd,
+						     TV_INF,
+						     tapdisk_server_scheduler_wake_handler,
+						     NULL);
+
 	server.run = 1;
 
 	return 0;
 
 fail:
+	for (int qid = 0; qid < ARRAY_SIZE(server.io_threads); qid++) {
+		if (server.io_threads[qid].tid)
+			pthread_cancel(server.io_threads[qid].tid);
+		if (server.io_threads[qid].eventfd != -1)
+			close(server.io_threads[qid].eventfd);
+
+		scheduler_unregister_event(&server.io_threads[qid].scheduler,
+					   server.io_threads[qid].eventid);
+	}
+
 	tapdisk_server_close_tlog();
 	tapdisk_server_close_aio();
 	return err;
@@ -900,5 +1097,12 @@ out:
 int
 tapdisk_server_event_set_timeout(event_id_t event_id, struct timeval timeo) {
 	return scheduler_event_set_timeout(&server.scheduler, event_id, timeo);
+}
+
+int
+tapdisk_server_io_event_set_timeout(td_queue_id_t qid, event_id_t event_id, struct timeval timeo) {
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	return scheduler_event_set_timeout(&server.io_threads[qid].scheduler,
+					   event_id, timeo);
 }
 

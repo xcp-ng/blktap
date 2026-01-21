@@ -221,7 +221,7 @@ void tapdisk_vbd_close_vdi(td_vbd_t *);
 int tapdisk_vbd_attach(td_vbd_t *, const char *, int);
 void tapdisk_vbd_detach(td_vbd_t *);
 
-int tapdisk_vbd_queue_request(td_vbd_t *, td_vbd_request_t *);
+int tapdisk_vbd_queue_request(td_vbd_t *, td_vbd_request_t *, bool);
 void tapdisk_vbd_forward_request(td_request_t);
 
 int tapdisk_vbd_get_disk_info(td_vbd_t *, td_disk_info_t *);

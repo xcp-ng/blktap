@@ -71,7 +71,7 @@ extern unsigned int PAGE_SHIFT;
 #define SECTOR_SHIFT                 9
 #define DEFAULT_SECTOR_SIZE          512
 
-#define TAPDISK_DATA_REQUESTS       (MAX_REQUESTS * BLKIF_MAX_SEGMENTS_PER_REQUEST)
+#define TAPDISK_DATA_REQUESTS       (MAX_REQUESTS * BLKIF_MAX_SEGMENTS_PER_REQUEST * BLKIF_MAX_QUEUES)
 
 //#define BLK_NOT_ALLOCATED            (-99)
 #define TD_NO_PARENT                 1
@@ -115,6 +115,7 @@ enum TD_OPS{
 
 typedef uint16_t                     td_uuid_t;
 typedef uint32_t                     td_flag_t;
+typedef uint32_t                     td_queue_id_t;
 typedef uint64_t                     td_sector_t;
 typedef struct td_disk_id            td_disk_id_t;
 typedef struct td_disk_info          td_disk_info_t;

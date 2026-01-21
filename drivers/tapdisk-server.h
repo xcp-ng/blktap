@@ -66,6 +66,11 @@ void tapdisk_server_unregister_event(event_id_t);
 void tapdisk_server_mask_event(event_id_t, int);
 void tapdisk_server_set_max_timeout(int);
 
+event_id_t tapdisk_server_register_io_event(td_queue_id_t qid, char, int, struct timeval, event_cb_t, void *);
+void tapdisk_server_unregister_io_event(td_queue_id_t qid, event_id_t);
+void tapdisk_server_mask_io_event(td_queue_id_t qid, event_id_t, int);
+void tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int);
+
 int tapdisk_server_init(void);
 int tapdisk_server_initialize(const char *, const char *);
 int tapdisk_server_complete(void);
@@ -78,7 +83,10 @@ void tapdisk_start_logging(const char *, const char *);
 void tapdisk_stop_logging(void);
 
 int tapdisk_server_event_set_timeout(event_id_t, struct timeval timeo);
+int tapdisk_server_io_event_set_timeout(td_queue_id_t qid, event_id_t event_id, struct timeval timeo);
 
 float tapdisk_server_system_idle_cpu(void);
+
+void tapdisk_server_scheduler_wake(void);
 
 #endif

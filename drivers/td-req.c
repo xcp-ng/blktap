@@ -79,7 +79,8 @@ static inline void
 td_xenblkif_bufcache_evt_unreg(struct td_blkif_queue * const queue)
 {
     if (queue->reqs_bufcache_evtid > 0){
-        tapdisk_server_unregister_event(queue->reqs_bufcache_evtid);
+        tapdisk_server_unregister_io_event(tapdisk_xenblkif_queue_id(queue),
+                                           queue->reqs_bufcache_evtid);
     }
     queue->reqs_bufcache_evtid = 0;
 }
@@ -93,7 +94,8 @@ static inline void
 td_xenblkif_bufcache_evt_reg(struct td_blkif_queue* queue)
 {
     queue->reqs_bufcache_evtid =
-        tapdisk_server_register_event(SCHEDULER_POLL_TIMEOUT,
+        tapdisk_server_register_io_event(tapdisk_xenblkif_queue_id(queue),
+                                      SCHEDULER_POLL_TIMEOUT,
                                       -1, /* dummy fd */
                                       TV_SECS(TD_REQS_BUFCACHE_EXPIRE),
                                       td_xenblkif_bufcache_event,
@@ -840,7 +842,7 @@ out:
  */
 static inline int
 tapdisk_xenblkif_queue_request(struct td_blkif_queue * const queue,
-        blkif_request_t *msg, struct td_xenblkif_req *req)
+        blkif_request_t *msg, struct td_xenblkif_req *req, bool final)
 {
     int err;
     bool queue_request;
@@ -864,7 +866,7 @@ tapdisk_xenblkif_queue_request(struct td_blkif_queue * const queue,
     }
 
 	if (likely(queue_request)) {
-		err = tapdisk_vbd_queue_request(queue->blkif->vbd, &req->vreq);
+		err = tapdisk_vbd_queue_request(queue->blkif->vbd, &req->vreq, final);
 		if (unlikely(err)) {
 			/* TODO log error */
 			queue->blkif->stats.errors.vbd++;
@@ -898,7 +900,7 @@ tapdisk_xenblkif_queue_requests(struct td_blkif_queue * const queue,
 
         ASSERT(req);
 
-        err = tapdisk_xenblkif_queue_request(queue, msg, req);
+        err = tapdisk_xenblkif_queue_request(queue, msg, req, (i == nr_reqs-1));
         if (err) {
             /* TODO log error */
             nr_errors++;

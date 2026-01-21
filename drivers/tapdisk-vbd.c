@@ -1215,14 +1215,15 @@ tapdisk_vbd_check_complete_requests(td_vbd_t *vbd)
 static void
 tapdisk_vbd_check_requests_for_issue(td_vbd_t *vbd)
 {
+	bool issue;
+
 	pthread_mutex_lock(&vbd->mutex);
-	if (!list_empty(&vbd->new_requests) ||
-	    !list_empty(&vbd->failed_requests)) {
-		pthread_mutex_unlock(&vbd->mutex);
-		tapdisk_vbd_issue_requests(vbd);
-		return;
-	}
+	issue = !list_empty(&vbd->new_requests) ||
+		!list_empty(&vbd->failed_requests);
 	pthread_mutex_unlock(&vbd->mutex);
+
+	if (issue)
+		tapdisk_vbd_issue_requests(vbd);
 }
 
 void
@@ -1870,19 +1871,17 @@ int
 tapdisk_vbd_recheck_state(td_vbd_t *vbd)
 {
 	int err = 0;
+	bool no_issue;
 
 	pthread_mutex_lock(&vbd->mutex);
-	if (list_empty(&vbd->new_requests)) {
-		pthread_mutex_unlock(&vbd->mutex);
-		return 0;
-	}
-
-	if (td_flag_test(vbd->state, TD_VBD_QUIESCED) ||
-	    td_flag_test(vbd->state, TD_VBD_QUIESCE_REQUESTED)) {
-		pthread_mutex_unlock(&vbd->mutex);
-		return 0;
-	}
+	no_issue =
+		list_empty(&vbd->new_requests) ||
+		td_flag_test(vbd->state, TD_VBD_QUIESCED) ||
+		td_flag_test(vbd->state, TD_VBD_QUIESCE_REQUESTED);
 	pthread_mutex_unlock(&vbd->mutex);
+
+	if (no_issue)
+		return 0;
 
 	err = tapdisk_vbd_issue_requests(vbd);
 
@@ -1942,7 +1941,7 @@ tapdisk_vbd_issue_requests(td_vbd_t *vbd)
 }
 
 int
-tapdisk_vbd_queue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
+tapdisk_vbd_queue_request(td_vbd_t *vbd, td_vbd_request_t *vreq, bool final)
 {
 	gettimeofday(&vreq->ts, NULL);
 	vreq->vbd = vbd;
@@ -1952,6 +1951,9 @@ tapdisk_vbd_queue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 	vreq->list_head = &vbd->new_requests;
 	vbd->received++;
 	pthread_mutex_unlock(&vbd->mutex);
+
+	if (final)
+		tapdisk_server_scheduler_wake();
 
 	return 0;
 }

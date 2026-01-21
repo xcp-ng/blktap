@@ -277,7 +277,7 @@ lcache_store_read(td_lcache_t *cache, td_lcache_req_t *req)
 
 	vbd = req->treq.vreq->vbd;
 
-	err = tapdisk_vbd_queue_request(vbd, vreq);
+	err = tapdisk_vbd_queue_request(vbd, vreq, true);  // TODO: suboptimal final argument
 	BUG_ON(err);
 }
 

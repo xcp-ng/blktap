@@ -607,14 +607,14 @@ tapdisk_control_attach_vbd(struct tapdisk_ctl_conn *conn,
 	 */
 
 	minor = request->cookie;
-	vbd = tapdisk_server_get_vbd(minor);
-	if (vbd) {
-		err = -EEXIST;
+	if (minor < 0) {
+		err = -EINVAL;
 		goto out;
 	}
 
-	if (minor < 0) {
-		err = -EINVAL;
+	vbd = tapdisk_server_get_vbd(minor);
+	if (vbd) {
+		err = -EEXIST;
 		goto out;
 	}
 
@@ -930,7 +930,6 @@ tapdisk_control_close_image(struct tapdisk_ctl_conn *conn,
 	if (!err) {
 		do {
 			err = tapdisk_blktap_remove_device(vbd->tap);
-
 			if (err == -EBUSY)
 				EPRINTF("device %s still open\n", vbd->name);
 
@@ -946,7 +945,6 @@ tapdisk_control_close_image(struct tapdisk_ctl_conn *conn,
 		ERR(err, "failure closing image\n");
 
 	if (err == -ENOTTY) {
-
 		while (!list_empty(&vbd->pending_requests))
 			tapdisk_server_iterate();
 

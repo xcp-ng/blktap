@@ -277,7 +277,6 @@ tapdisk_xenio_ctx_process_ring(struct td_blkif_queue *queue, bool final)
             queue->barrier.io_err = 0;
             break;
         }
-
     } while (1);
 
     n_reqs = start - queue->n_reqs_free;
@@ -325,11 +324,19 @@ tapdisk_xenio_ctx_ring_event(event_id_t id __attribute__((unused)),
         char mode __attribute__((unused)), void *private)
 {
     struct td_blkif_queue *queue = private;
+    xenevtchn_port_or_error_t port;
+    int err;
+
+    /* Ignore initial spurious event */
+    /* XXX: should we have a mecanism to postpone event ?
+            What will happen if it is never triggered again ?
+            This is might be safe because keeps triggering until
+            xenevtchn_pending() is called */
+    if (queue->ctx == NULL)
+        return;
 
     ASSERT(queue);
 
-    xenevtchn_port_or_error_t port;
-    int err;
 
     /*
      * Get the local port for which there is a pending event.
@@ -475,6 +482,7 @@ tapdisk_xenio_ctx_bind_queue(struct td_xenio_shared_ctx * shared_ctx,
     int ret = -1;
     xenevtchn_handle* evthdl = NULL;
     event_id_t ring_event = -1;
+    td_queue_id_t qid = tapdisk_xenblkif_queue_id(queue);
 
     evthdl = xenevtchn_open(NULL, 0);
     if (!evthdl) {
@@ -492,8 +500,9 @@ tapdisk_xenio_ctx_bind_queue(struct td_xenio_shared_ctx * shared_ctx,
         goto fail;
     }
 
-    ring_event = tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
-                                               fd, TV_ZERO, tapdisk_xenio_ctx_ring_event, queue);
+    ring_event = tapdisk_server_register_io_event(qid,
+                                                  SCHEDULER_POLL_READ_FD,
+                                                  fd, TV_ZERO, tapdisk_xenio_ctx_ring_event, queue);
     if (ring_event < 0) {
         err = ring_event;
         ERROR("failed to register event: %s\n", strerror(-err));
@@ -525,7 +534,7 @@ tapdisk_xenio_ctx_bind_queue(struct td_xenio_shared_ctx * shared_ctx,
 
 fail:
     if (ring_event >= 0)
-        tapdisk_server_unregister_event(ring_event);
+        tapdisk_server_unregister_io_event(qid, ring_event);
     if (ret != -1)
         xenevtchn_unbind(evthdl, ret);
     if (evthdl)
@@ -535,10 +544,11 @@ fail:
 }
 
 void
-tapdisk_xenio_ctx_unbind_queue(struct td_xenio_ctx* ctx)
+tapdisk_xenio_ctx_unbind_queue(struct td_xenio_ctx* ctx, struct td_blkif_queue* queue)
 {
     if (ctx->ring_event >= 0) {
-        tapdisk_server_unregister_event(ctx->ring_event);
+        tapdisk_server_unregister_io_event(tapdisk_xenblkif_queue_id(queue),
+                                           ctx->ring_event);
         ctx->ring_event = -1;
         ctx->fd = -1;
     }

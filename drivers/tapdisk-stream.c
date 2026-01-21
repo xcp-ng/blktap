@@ -282,7 +282,7 @@ tapdisk_stream_queue_request(td_stream_t *s, td_stream_req_t *req)
 	s->count  -= secs;
 	s->sec_in += secs;
 
-	err = tapdisk_vbd_queue_request(s->vbd, vreq);
+	err = tapdisk_vbd_queue_request(s->vbd, vreq, true);
 	if (err)
 		tapdisk_stream_complete_request(s, req, err, 1);
 

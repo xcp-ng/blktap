@@ -217,7 +217,7 @@ llpcache_requeue_treq(td_llpcache_t *s, td_llpcache_req_t *req, int target)
 	vreq->cb      = __llpcache_write_cb;
 	vreq->token   = s;
 
-	err = tapdisk_vbd_queue_request(req->treq.vreq->vbd, vreq);
+	err = tapdisk_vbd_queue_request(req->treq.vreq->vbd, vreq, true);  // TODO: suboptimal final argument
 	if (err)
 		goto fail;
 

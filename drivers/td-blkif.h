@@ -152,6 +152,7 @@ struct td_xenblkif {
          * Back pointer to the block interface owning the queue
          */
         struct td_xenblkif* blkif;
+
     } queues[BLKIF_MAX_QUEUES];
 
     /**
@@ -358,7 +359,7 @@ tapdisk_xenblkif_barrier_should_complete(
 /*
  * Return index of the queue
  */
-static inline unsigned int
+static inline td_queue_id_t
 tapdisk_xenblkif_queue_id(const struct td_blkif_queue* queue) {
     return queue - queue->blkif->queues;
 }
