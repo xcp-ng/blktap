@@ -379,9 +379,10 @@ tap_ctl_list_pid(pid_t pid, struct list_head *list)
 	}
 
 	err = _tap_ctl_list_tapdisk(t->pid, list);
-
 	if (err || list_empty(list))
 		list_add_tail(&t->entry, list);
+	else
+		_tap_list_free(t);
 
 	return 0;
 }
