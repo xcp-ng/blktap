@@ -474,7 +474,7 @@ physical_device_changed(vbd_t *device) {
 
     err = find_tapdisk(device->minor, device->tap);
     if (err) {
-        WARN(device, "error looking for tapdisk: %s\n", strerror(-err));
+        WARN(device, "error looking for tapdisk minor=%d: %s\n", device->minor, strerror(-err));
         goto out;
     }
 
