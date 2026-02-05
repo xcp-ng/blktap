@@ -115,7 +115,8 @@ int
 tap_cli_list(int argc, char **argv, td_err *error)
 {
 	struct list_head list = LIST_HEAD_INIT(list);
-	int c, minor, tty, err;
+	int c, minor, err;
+	bool tty;
 	const char *type, *file;
 	tap_list_t *entry;
 	pid_t pid;
@@ -206,7 +207,7 @@ tap_cli_allocate(int argc, char **argv, td_err *error)
 {
 	char *devname;
 	int c, minor, err;
-	char d_flag = 0;
+	bool d_flag = false;
 
 	devname = NULL;
 	td_err_init_errno(error);
@@ -216,7 +217,7 @@ tap_cli_allocate(int argc, char **argv, td_err *error)
 		switch (c) {
 		case 'd':
 			devname = optarg;
-			d_flag = 1;
+			d_flag = true;
 			break;
 		case '?':
 			goto usage;
@@ -300,7 +301,7 @@ tap_cli_create(int argc, char **argv, td_err *error)
 {
 	int c, flags, prt_minor, timeout, err;
 	char *args, *devname, *secondary;
-	char d_flag = 0;
+	bool d_flag = false;
 	char *logpath = NULL;
 
 	args      = NULL;
@@ -319,7 +320,7 @@ tap_cli_create(int argc, char **argv, td_err *error)
 			break;
 		case 'd':
 			devname = optarg;
-			d_flag = 1;
+			d_flag = true;
 			break;
 		case 'R':
 			flags |= TAPDISK_MESSAGE_FLAG_RDONLY;
@@ -448,7 +449,8 @@ tap_cli_spawn_usage(FILE *stream)
 static int
 tap_cli_spawn(int argc, char **argv, td_err *error)
 {
-	int c, tty;
+	int c;
+	bool tty;
 	pid_t pid;
 	td_err_init_errno(error);
 
@@ -579,12 +581,13 @@ tap_cli_close_usage(FILE *stream)
 static int
 tap_cli_close(int argc, char **argv, td_err *error)
 {
-	int c, pid, minor, force, err;
+	int c, pid, minor, err;
+	bool force;
 	struct timeval *timeout;
 
 	pid     = -1;
 	minor   = -1;
-	force   = 0;
+	force   = false;
 	timeout = NULL;
 	td_err_init_errno(error);
 
@@ -598,7 +601,7 @@ tap_cli_close(int argc, char **argv, td_err *error)
 			minor = atoi(optarg);
 			break;
 		case 'f':
-			force = -1;
+			force = true;
 			break;
 		case 't':
 			timeout = tap_cli_timeout(optarg);
@@ -750,18 +753,19 @@ tap_cli_major_usage(FILE *stream)
 static int
 tap_cli_major(int argc, char **argv, td_err *error)
 {
-	int c, chr, major;
+	int c, major;
+	bool chr;
 
-	chr = 0;
+	chr = false;
 	td_err_init_errno(error);
 
 	while ((c = getopt(argc, argv, "bch")) != -1) {
 		switch (c) {
 		case 'b':
-			chr = 0;
+			chr = false;
 			break;
 		case 'c':
-			chr = 1;
+			chr = true;
 			break;
 		case '?':
 			goto usage;
@@ -1248,7 +1252,7 @@ main(int argc, char *argv[])
 		char *arg = argv[i + (argc - cargc)];
 
 		if (!strcmp(arg, "--debug")) {
-			tap_ctl_debug = 1;
+			tap_ctl_debug = true;
 			continue;
 		}
 

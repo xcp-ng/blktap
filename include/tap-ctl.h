@@ -31,7 +31,7 @@
 
 #define TAPCTL_COMM_RETRY_TIMEOUT 120
 
-extern int tap_ctl_debug;
+extern bool tap_ctl_debug;
 
 #ifdef TAPCTL
 #define DBG(_f, _a...)				\
@@ -98,9 +98,9 @@ int tap_ctl_find_minor(const char *type, const char *path);
 int tap_ctl_allocate(int *minor, char **devname);
 int tap_ctl_free(const int minor);
 
-int tap_ctl_create(const char *params, char **devname, int flags, 
+int tap_ctl_create(const char *params, char **devname, int flags,
 		   int prt_minor, char *secondary, int timeout, const char *logpath);
-int tap_ctl_destroy(const int id, const int minor, int force,
+int tap_ctl_destroy(const int id, const int minor, bool force,
 		    struct timeval *timeout);
 
 int tap_ctl_spawn(void);
@@ -112,7 +112,7 @@ int tap_ctl_detach(const int id, const int minor);
 int tap_ctl_open(const int id, const int minor, const char *params, int flags,
 		 const int prt_minor, const char *secondary, int timeout,
 		 const char *logpath, uint8_t key_size, uint8_t *encryption_key);
-int tap_ctl_close(const int id, const int minor, const int force,
+int tap_ctl_close(const int id, const int minor, const bool force,
 		  struct timeval *timeout);
 
 /**

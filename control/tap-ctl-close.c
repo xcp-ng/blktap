@@ -29,7 +29,7 @@
 #include "tap-ctl.h"
 
 int
-tap_ctl_close(const int id, const int minor, const int force,
+tap_ctl_close(const int id, const int minor, const bool force,
             struct timeval *timeout)
 {
     int err;

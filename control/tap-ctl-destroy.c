@@ -31,11 +31,11 @@
 
 int
 tap_ctl_destroy(const int id, const int minor,
-		int force, struct timeval *timeout)
+		bool force, struct timeval *timeout)
 {
 	int err;
 
-	err = tap_ctl_close(id, minor, 0, timeout);
+	err = tap_ctl_close(id, minor, false, timeout);
 	if (err)
 		return err;
 
