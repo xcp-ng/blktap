@@ -181,7 +181,7 @@ static void
 tapdisk_xenblkif_free_request(struct td_xenblkif * const blkif,
         struct td_xenblkif_req * const req)
 {
-    int put_bufcache;
+    bool put_bufcache;
 
     ASSERT(blkif);
     ASSERT(req);
@@ -272,7 +272,7 @@ xenio_blkif_get_response(struct td_xenblkif* const blkif, const RING_IDX rp)
  */
 static int
 xenio_blkif_put_response(struct td_xenblkif * const blkif,
-        struct td_xenblkif_req *req, int const status, int const final)
+        struct td_xenblkif_req *req, int const status, bool const final)
 {
     blkif_common_back_ring_t * const ring = &blkif->rings.common;
 
@@ -434,7 +434,7 @@ out:
  */
 static bool
 tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
-		struct td_xenblkif_req* req, int err, const int final,
+		struct td_xenblkif_req* req, int err, const bool final,
 		bool lock)
 {
 	int _err;
@@ -829,7 +829,7 @@ tapdisk_xenblkif_queue_request(struct td_xenblkif * const blkif,
         blkif_request_t *msg, struct td_xenblkif_req *req)
 {
     int err;
-    int queue_request;
+    bool queue_request;
 
     ASSERT(blkif);
     ASSERT(msg);
@@ -899,7 +899,7 @@ tapdisk_xenblkif_queue_requests(struct td_xenblkif * const blkif,
 
     if (nr_errors && !blkif_freed) {
         pthread_mutex_lock(&blkif->mutex);
-        xenio_blkif_put_response(blkif, NULL, 0, 1);
+        xenio_blkif_put_response(blkif, NULL, 0, true);
         pthread_mutex_unlock(&blkif->mutex);
     }
 }

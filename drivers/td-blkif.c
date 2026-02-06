@@ -366,7 +366,7 @@ tapdisk_xenblkif_cb_stoppolling(event_id_t id __attribute__((unused)),
     ASSERT(blkif);
 
     /* Process the ring one final time, setting the event counter */
-    if (!tapdisk_xenio_ctx_process_ring(blkif, blkif->ctx, 1)) {
+    if (!tapdisk_xenio_ctx_process_ring(blkif, blkif->ctx, true)) {
         /* If there were no new requests this time, then stop polling */
         blkif->in_polling = false;
 

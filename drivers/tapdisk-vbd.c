@@ -63,7 +63,7 @@
 char* op_strings[TD_OPS_END] ={"read", "write", "block_status"};
 
 static void tapdisk_vbd_complete_vbd_request(td_vbd_t *, td_vbd_request_t *);
-static int  tapdisk_vbd_queue_ready(td_vbd_t *);
+static bool tapdisk_vbd_queue_ready(td_vbd_t *);
 static void tapdisk_vbd_check_complete_requests(td_vbd_t *);
 static void tapdisk_vbd_check_requests_for_issue(td_vbd_t *);
 
@@ -139,7 +139,7 @@ tapdisk_vbd_add_image(td_vbd_t *vbd, td_image_t *image)
 	list_add_tail(&image->next, &vbd->images);
 }
 
-static inline int
+static inline bool
 tapdisk_vbd_is_last_image(td_vbd_t *vbd, td_image_t *image)
 {
 	return list_is_last(&image->next, &vbd->images);
@@ -916,7 +916,7 @@ tapdisk_vbd_get_disk_info(td_vbd_t *vbd, td_disk_info_t *info)
 	return 0;
 }
 
-static int
+static bool
 tapdisk_vbd_queue_ready(td_vbd_t *vbd)
 {
 	return (!td_flag_test(vbd->state, TD_VBD_DEAD) &&
@@ -925,7 +925,7 @@ tapdisk_vbd_queue_ready(td_vbd_t *vbd)
 		!td_flag_test(vbd->state, TD_VBD_QUIESCE_REQUESTED));
 }
 
-int
+bool
 tapdisk_vbd_retry_needed(td_vbd_t *vbd)
 {
 	bool retry;
@@ -1181,11 +1181,11 @@ tapdisk_vbd_request_ttl(td_vbd_request_t *vreq,
 	return vreq->vbd->req_timeout - delta.tv_sec;
 }
 
-static int
+static bool
 __tapdisk_vbd_request_timeout(td_vbd_request_t *vreq,
 			      const struct timeval *now)
 {
-	int timeout;
+	bool timeout;
 
 	timeout = tapdisk_vbd_request_ttl(vreq, now) < 0;
 	if (timeout)
@@ -1196,7 +1196,7 @@ __tapdisk_vbd_request_timeout(td_vbd_request_t *vreq,
 	return timeout;
 }
 
-static int
+static bool
 tapdisk_vbd_request_timeout(td_vbd_request_t *vreq)
 {
 	struct timeval now;
@@ -1329,24 +1329,24 @@ tapdisk_vbd_check_queue(td_vbd_t *vbd)
 	return 0;
 }
 
-static int
+static bool
 tapdisk_vbd_request_should_retry(td_vbd_t *vbd, td_vbd_request_t *vreq)
 {
 	if (td_flag_test(vbd->state, TD_VBD_DEAD) ||
 	    td_flag_test(vbd->state, TD_VBD_SHUTDOWN_REQUESTED))
-		return 0;
+		return false;
 
 	if (tapdisk_vbd_request_timeout(vreq))
-		return 0;
+		return false;
 
 	switch (abs(vreq->error)) {
 	case EAGAIN:
 	case EBUSY:
 	case EINTR:
-		return 1;
+		return true;
 	}
 
-	return 0;
+	return false;
 }
 
 static void
@@ -1770,7 +1770,7 @@ fail:
 	goto out;
 }
 
-static int
+static bool
 tapdisk_vbd_request_completed(td_vbd_t *vbd, td_vbd_request_t *vreq)
 {
 	return vreq->list_head == &vbd->completed_requests;

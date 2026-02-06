@@ -242,11 +242,11 @@ __xenio_blkif_get_requests(struct td_xenblkif * const blkif,
  */
 static inline int
 xenio_blkif_get_requests(struct td_xenblkif * const blkif,
-        blkif_request_t *reqs[], const int count, const int final)
+        blkif_request_t *reqs[], const int count, const bool final)
 {
     blkif_common_back_ring_t * ring;
     int n = 0;
-    int work = 0;
+    bool work = false;
 
     ASSERT(blkif);
     ASSERT(reqs);
@@ -277,7 +277,7 @@ xenio_blkif_get_requests(struct td_xenblkif * const blkif,
 
 int
 tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
-		               struct td_xenio_ctx *ctx, int final)
+		               struct td_xenio_ctx *ctx, bool final)
 {
     int n_reqs;
     int start;
@@ -387,7 +387,7 @@ tapdisk_xenio_ctx_ring_event(event_id_t id __attribute__((unused)),
 
     blkif->stats.kicks.in++;
 
-    tapdisk_xenio_ctx_process_ring(blkif, ctx, 0);
+    tapdisk_xenio_ctx_process_ring(blkif, ctx, false);
 }
 
 /* NB. may be NULL, but then the image must be bouncing I/O */
@@ -488,18 +488,18 @@ __td_xenio_ctx_match(struct td_xenio_ctx * ctx, const char *pool_name)
 	return !strcmp(ctx->pool_name, pool_name);
 }
 
-#define tapdisk_xenio_find_ctx(_ctx, _cond)	\
-	do {									\
-		int found = 0;						\
-		tapdisk_xenio_for_each_ctx(_ctx) {	\
-			if (_cond) {					\
-				found = 1;					\
-				break;						\
-			}								\
-		}									\
-		if (!found)							\
-			_ctx = NULL;					\
-	} while (0)
+#define tapdisk_xenio_find_ctx(_ctx, _cond)     \
+    do {                                        \
+        bool found = false;                     \
+        tapdisk_xenio_for_each_ctx(_ctx) {      \
+            if (_cond) {                        \
+                found = true;                   \
+                break;                          \
+            }                                   \
+        }                                       \
+        if (!found)                             \
+            _ctx = NULL;                        \
+    } while (0)
 
 int
 tapdisk_xenio_ctx_get(const char *pool_name, struct td_xenio_ctx ** _ctx)
