@@ -54,6 +54,11 @@ struct td_xenblkif_req {
      */
     blkif_request_t msg;
 
+    /*
+     * Queue number the request is originating from.
+     */
+    td_queue_id_t queue_idx;
+
     /**
      * tapdisk's representation of the request.
      */
