@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,9 +57,19 @@ __tap_ctl_spawn(int *readfd)
 		exit(errno);
 	}
 
-	if (dup2(channel[1], STDERR_FILENO) == -1) {
-		EPRINTF("dup2 failed: %d\n", errno);
-		exit(errno);
+	/*
+	 * Redirect stderr to /dev/null rather than the pipe: third-party
+	 * libraries (e.g. liblttng-ust) may write diagnostic messages to
+	 * stderr before tapdisk's main() runs, which would corrupt the
+	 * control socket path we need to parse from the pipe.
+	 * Early tapdisk errors are already reported via syslog (DPRINTF).
+	 */
+	{
+		int devnull = open("/dev/null", O_WRONLY);
+		if (devnull >= 0) {
+			dup2(devnull, STDERR_FILENO);
+			close(devnull);
+		}
 	}
 
 	close(channel[0]);

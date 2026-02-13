@@ -30,6 +30,9 @@
 #include "tapdisk-server.h"
 #include "tapdisk-interface.h"
 #include "tapdisk-log.h"
+#include "util.h"
+
+#include "td-tracepoints.h"
 
 int
 td_load(td_image_t *image)
@@ -179,6 +182,10 @@ td_queue_write(td_image_t *image, td_request_t treq)
 	if (err)
 		goto fail;
 
+	td_queue_id_t __unused qid = treq.vreq->vqueue - treq.vreq->vqueue->vbd->queues;
+	tracepoint(tapdisk, driver_queue,
+		qid, treq.vreq->req_id, treq.op, treq.sec, treq.secs);
+
 	driver->ops->td_queue_write(driver, treq);
 
 	return;
@@ -213,6 +220,10 @@ td_queue_read(td_image_t *image, td_request_t treq)
 	err = tapdisk_image_check_td_request(image, treq);
 	if (err)
 		goto fail;
+
+	td_queue_id_t __unused qid = treq.vreq->vqueue - treq.vreq->vqueue->vbd->queues;
+	tracepoint(tapdisk, driver_queue,
+		qid, treq.vreq->req_id, treq.op, treq.sec, treq.secs);
 
 	driver->ops->td_queue_read(driver, treq);
 
@@ -341,6 +352,9 @@ td_forward_request(td_request_t treq)
 void
 td_complete_request(td_request_t treq, int res)
 {
+	td_queue_id_t __unused qid = treq.vreq->vqueue - treq.vreq->vqueue->vbd->queues;
+	tracepoint(tapdisk, driver_complete,
+		   qid, treq.vreq->req_id, treq.op, treq.sec, treq.secs/*, res*/);
 	treq.cb(treq, res);
 }
 
@@ -371,7 +385,6 @@ td_debug(td_image_t *image)
 
 	driver = image->driver;
 	if (!driver || !td_flag_test(driver->state, TD_DRIVER_OPEN))
-
 		return;
 
 	tapdisk_driver_debug(driver);

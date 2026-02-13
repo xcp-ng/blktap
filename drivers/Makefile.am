@@ -101,12 +101,21 @@ libtapdisk_la_SOURCES += td-ctx.h
 libtapdisk_la_SOURCES += td-stats.c
 libtapdisk_la_SOURCES += td-stats.h
 
+if ENABLE_LTTNG
+libtapdisk_la_SOURCES += td-tracepoints.c
+libtapdisk_la_SOURCES += td-tracepoints.h
+AM_CPPFLAGS += $(LTTNG_UST_CFLAGS)
+endif
+
 libtapdisk_la_LIBADD  = ../vhd/lib/libvhd.la
 libtapdisk_la_LIBADD += ../qcow2/lib/libqcow2.la
 libtapdisk_la_LIBADD += -laio
 libtapdisk_la_LIBADD += -lxenevtchn
 libtapdisk_la_LIBADD += -lxengnttab
 libtapdisk_la_LIBADD += -lz
+if ENABLE_LTTNG
+libtapdisk_la_LIBADD += $(LTTNG_UST_LIBS) -ldl
+endif
 libtapdisk_la_LIBADD += -lrt
 libtapdisk_la_LIBADD += -ldl
 libtapdisk_la_LIBADD += -lm
