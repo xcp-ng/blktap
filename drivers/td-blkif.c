@@ -30,7 +30,6 @@
 #include "blktap3.h"
 #include "tapdisk.h"
 #include "tapdisk-log.h"
-#include "util.h"
 #include "tapdisk-server.h"
 #include "tapdisk-metrics.h"
 #include "timeout-math.h"
@@ -38,6 +37,8 @@
 #include "td-blkif.h"
 #include "td-ctx.h"
 #include "td-req.h"
+
+#include "util.h"
 
 struct td_xenblkif *
 tapdisk_xenblkif_find(const domid_t domid, const int devid)

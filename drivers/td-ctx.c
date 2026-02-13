@@ -27,12 +27,15 @@
 #include <alloca.h>
 
 #include "blktap-xenif.h"
+#include "config.h"
 #include "debug.h"
 #include "tapdisk-server.h"
 #include "td-ctx.h"
 #include "tapdisk-log.h"
 #include "timeout-math.h"
 #include "util.h"
+
+#include "td-tracepoints.h"
 
 #define ERROR(_f, _a...)           tlog_syslog(TLOG_WARN, "td-ctx: " _f, ##_a)
 
@@ -168,6 +171,11 @@ __xenio_blkif_get_requests(struct td_blkif_queue * const queue,
         blkif_request_t *dst = reqs[n];
 
         xenio_blkif_get_request(queue, dst, rc);
+
+        tracepoint(tapdisk, request_pull,
+            tapdisk_xenblkif_queue_id(queue),
+            dst->id, dst->operation, dst->nr_segments,
+            dst->sector_number);
 
         if (unlikely(dst->operation == BLKIF_OP_WRITE_BARRIER))
             barrier = true;

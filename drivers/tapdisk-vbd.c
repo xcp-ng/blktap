@@ -34,6 +34,7 @@
 #include "tapdisk-driver.h"
 #include "tapdisk-server.h"
 #include "tapdisk-vbd.h"
+#include "td-tracepoints.h"
 #include "tapdisk-metrics.h"
 #include "tapdisk-disktype.h"
 #include "tapdisk-interface.h"
@@ -1776,6 +1777,10 @@ tapdisk_vbd_issue_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 	vreq->last_try = queue->ts;
 
 	tapdisk_vbd_move_request(vreq, &queue->pending_requests);
+
+	td_queue_id_t __unused qid = queue - queue->vbd->queues;
+	tracepoint(tapdisk, vbd_issue, qid,
+	    vreq->req_id, vreq->op, vreq->sec, vreq->iovcnt);
 
 	err = tapdisk_vbd_check_queue(vbd);
 	pthread_mutex_unlock(&queue->mutex);

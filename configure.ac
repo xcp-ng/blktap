@@ -55,8 +55,24 @@ AC_ARG_ENABLE([tests],
 	      [],
 	      [enable_tests=no])
 
+AC_ARG_ENABLE([lttng],
+	      [AS_HELP_STRING([--enable-lttng],
+			      [enable LTTng-UST tracepoints])],
+	      [],
+	      [enable_lttng=no])
+
+AS_IF([test x$enable_lttng = xyes],
+      [PKG_CHECK_MODULES([LTTNG_UST], [lttng-ust],
+			 [AC_DEFINE([HAVE_LTTNG], [1],
+				    [Define if LTTng-UST is available])],
+			 [AC_MSG_ERROR([--enable-lttng requires lttng-ust development files])])])
+
 AM_CONDITIONAL([ENABLE_TESTS],
 	       [test x$enable_tests = xyes])
+AM_CONDITIONAL([ENABLE_LTTNG],
+	       [test x$enable_lttng = xyes])
+AM_CONDITIONAL([ENABLE_STATIC],
+	       [test "x$enable_static" = "xyes"])
 
 AC_CHECK_FUNCS([eventfd])
 
