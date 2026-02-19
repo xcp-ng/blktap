@@ -52,14 +52,14 @@
 #define DBG(_level, _f, _a...)       tlog_write(_level, _f, ##_a)
 #define ERR(_err, _f, _a...)         tlog_error(_err, _f, ##_a)
 
-#define TAPDISK_TIOCBS              (TAPDISK_DATA_REQUESTS + 50)
+#define TAPDISK_TIOCBS_PER_QUEUE    (MAX_REQUESTS * BLKIF_MAX_SEGMENTS_PER_REQUEST + 50)
 
 typedef struct tapdisk_server {
 	int                          run;
 	struct list_head             vbds;
 	scheduler_t                  scheduler;
-	tqueue                       rw_queue;
-	tqueue                       ro_queue;
+	tqueue                       rw_queue[TAPDISK_MAX_VBD_THREADS];
+	tqueue                       ro_queue[TAPDISK_MAX_VBD_THREADS];
 	struct backend              *ro_backend;
 	struct backend              *rw_backend;
 	char                        *name;
@@ -109,6 +109,8 @@ typedef struct tapdisk_server {
 } tapdisk_server_t;
 
 static tapdisk_server_t server;
+
+static __thread td_queue_id_t current_qid = 0;
 
 unsigned int PAGE_SIZE;
 unsigned int PAGE_MASK;
@@ -177,7 +179,7 @@ tapdisk_server_prep_tiocb(struct tiocb *tiocb, int fd, int rw, char *buf, size_t
 void
 tapdisk_server_queue_tiocb(struct tiocb *tiocb)
 {
-	server.rw_backend->queue(server.rw_queue, tiocb);
+	server.rw_backend->queue(server.rw_queue[current_qid], tiocb);
 }
 
 void
@@ -190,7 +192,7 @@ tapdisk_server_prep_tiocb_ro(struct tiocb *tiocb, int fd, int rw, char *buf, siz
 void
 tapdisk_server_queue_tiocb_ro(struct tiocb *tiocb)
 {
-	server.ro_backend->queue(server.ro_queue, tiocb);
+	server.ro_backend->queue(server.ro_queue[current_qid], tiocb);
 }
 
 void
@@ -198,10 +200,12 @@ tapdisk_server_debug(void)
 {
 	td_vbd_t *vbd, *tmp;
 
-	if (likely(server.rw_queue))
-		server.rw_backend->debug(server.rw_queue);
-	if (likely(server.ro_queue))
-		server.ro_backend->debug(server.ro_queue);
+	for (int qid = 0; qid < TAPDISK_MAX_VBD_THREADS; qid++) {
+		if (likely(server.rw_queue[qid]))
+			server.rw_backend->debug(server.rw_queue[qid]);
+		if (likely(server.ro_queue[qid]))
+			server.ro_backend->debug(server.ro_queue[qid]);
+	}
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
 		tapdisk_vbd_debug(vbd);
@@ -243,9 +247,17 @@ tapdisk_server_set_max_timeout(int seconds)
 	scheduler_set_max_timeout(&server.scheduler, TV_SECS(seconds));
 }
 
+#define IO_THREAD_WAKE
+#ifdef IO_THREAD_WAKE
+static
 void tapdisk_server_io_thread_wake(td_queue_id_t qid)
 {
 	int n;
+
+	// XXX: thread_wake might called by IO backend before IO threads are fully
+	//      initialized
+	if (server.io_threads[qid].eventfd == -1)
+		return;
 
 	server.io_threads[qid].eventfd_count++;
 	n = write(server.io_threads[qid].eventfd,
@@ -253,6 +265,7 @@ void tapdisk_server_io_thread_wake(td_queue_id_t qid)
 		  sizeof(server.io_threads[qid].eventfd_count));
 	ASSERT(n == 8);
 }
+#endif
 
 void tapdisk_server_io_thread_handler(event_id_t id, char mode __attribute__((unused)), void *private)
 {
@@ -274,8 +287,10 @@ tapdisk_server_register_io_event(td_queue_id_t qid, char mode, int fd,
 	eid =  scheduler_register_event(&server.io_threads[qid].scheduler,
 					mode, fd, timeout, cb, data);
 
+#ifdef IO_THREAD_WAKE
 	/* Wake thread to use the newly registered event */
 	tapdisk_server_io_thread_wake(qid);
+#endif
 
 	return eid;
 }
@@ -350,10 +365,10 @@ tapdisk_server_check_progress(td_queue_id_t qid)
 }
 
 static void
-tapdisk_server_submit_tiocbs(void)
+tapdisk_server_submit_tiocbs(td_queue_id_t qid)
 {
-	server.rw_backend->submit_all(server.rw_queue);
-	server.ro_backend->submit_all(server.ro_queue);
+	server.rw_backend->submit_all(server.rw_queue[qid]);
+	server.ro_backend->submit_all(server.ro_queue[qid]);
 }
 
 static void
@@ -407,20 +422,31 @@ static int
 tapdisk_server_init_aio(void)
 {
 	int err;
-       	err = server.ro_backend->init(&server.ro_queue, TAPDISK_TIOCBS,
-				  TIO_DRV_LIO, NULL);
-	if(err)
-		return err;
-	
-	return server.rw_backend->init(&server.rw_queue, TAPDISK_TIOCBS,
-				  TIO_DRV_LIO, NULL);
+
+	for (int qid = 0; qid < TAPDISK_MAX_VBD_THREADS; qid++) {
+		err = server.ro_backend->init(&server.ro_queue[qid],
+				  TAPDISK_TIOCBS_PER_QUEUE,
+				  TIO_DRV_LIO, NULL, qid);
+		if (err)
+			return err;
+
+		err = server.rw_backend->init(&server.rw_queue[qid],
+				  TAPDISK_TIOCBS_PER_QUEUE,
+				  TIO_DRV_LIO, NULL, qid);
+		if (err)
+			return err;
+	}
+
+	return 0;
 }
 
 static void
 tapdisk_server_close_aio(void)
 {
-	server.rw_backend->free_queue(&server.rw_queue);
-	server.ro_backend->free_queue(&server.ro_queue);
+	for (int qid = 0; qid < TAPDISK_MAX_VBD_THREADS; qid++) {
+		server.rw_backend->free_queue(&server.rw_queue[qid]);
+		server.ro_backend->free_queue(&server.ro_queue[qid]);
+	}
 }
 
 int
@@ -488,6 +514,8 @@ tapdisk_io_iterate(td_queue_id_t qid)
 {
 	int ret;
 
+	current_qid = qid;
+
 	tapdisk_server_set_retry_timeout(qid);
 	tapdisk_server_check_progress(qid);
 
@@ -497,7 +525,7 @@ tapdisk_io_iterate(td_queue_id_t qid)
 
 	tapdisk_server_check_vbds(qid);
 	do {
-		tapdisk_server_submit_tiocbs();
+		tapdisk_server_submit_tiocbs(qid);
 		tapdisk_server_kick_responses(qid);
 
 		ret = tapdisk_server_recheck_vbds(qid);
