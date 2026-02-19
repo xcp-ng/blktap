@@ -59,7 +59,7 @@ struct tlist {
 
 
 typedef void (*debug_queue)(tqueue );
-typedef int (*init_queue)(tqueue* , int size, int drv, struct tfilter *);
+typedef int (*init_queue)(tqueue* , int size, int drv, struct tfilter *, int qid);
 typedef	void (*free_queue)(tqueue* );
 typedef	void (*up_queue)(tqueue , struct tiocb *);
 typedef	int  (*submit_all_queue)(tqueue );

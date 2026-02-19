@@ -69,7 +69,7 @@ struct tio {
 	const char           *name;
 	size_t                data_size;
 
-	int  (*tio_setup)    (posix_aio_queue *queue, int qlen);
+	int  (*tio_setup)    (posix_aio_queue *queue, int qlen, int qid);
 	void (*tio_destroy)  (posix_aio_queue *queue);
 	int  (*tio_submit)   (posix_aio_queue *queue);
 };
@@ -209,6 +209,7 @@ struct lio {
 	int              event_id;
 
 	int              flags;
+	int              qid;
 };
 
 #define LIO_FLAG_EVENTFD        (1<<0)
@@ -265,7 +266,7 @@ posixaio_backend_lio_destroy(posix_aio_queue *queue)
 		return;
 
 	if (lio->event_id >= 0) {
-		tapdisk_server_unregister_event(lio->event_id);
+		tapdisk_server_unregister_io_event(lio->qid, lio->event_id);
 		lio->event_id = -1;
 	}
 
@@ -303,20 +304,22 @@ posixaio_backend_lio_event(event_id_t id, char mode, void *private)
 }
 
 static int
-posixaio_backend_lio_setup(posix_aio_queue *queue, int qlen)
+posixaio_backend_lio_setup(posix_aio_queue *queue, int qlen, int qid)
 {
 	WARN("posixaio_backend_lio_setup");
 	struct lio *lio = queue->tio_data;
 	int err;
 
 	lio->event_id = -1;
+	lio->qid = qid;
 
 	err = posixaio_backend_lio_setup_aio(queue, qlen);
 	if (err)
 		goto fail;
 
 	lio->event_id =
-		tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
+		tapdisk_server_register_io_event(qid,
+					      SCHEDULER_POLL_READ_FD,
 					      lio->event_fd, TV_ZERO,
 					      posixaio_backend_lio_event,
 					      queue);
@@ -390,7 +393,7 @@ posixaio_backend_queue_free_io(posix_aio_queue *queue)
 }
 
 static int
-posixaio_backend_queue_init_io(posix_aio_queue *queue, int drv)
+posixaio_backend_queue_init_io(posix_aio_queue *queue, int drv, int qid)
 {
 	const struct tio *tio;
 	int err;
@@ -414,7 +417,7 @@ posixaio_backend_queue_init_io(posix_aio_queue *queue, int drv)
 	queue->tio = tio;
 
 	if (tio->tio_setup) {
-		err = tio->tio_setup(queue, queue->size);
+		err = tio->tio_setup(queue, queue->size, qid);
 		if (err)
 			goto fail;
 	}
@@ -451,7 +454,7 @@ posixaio_backend_free_queue(tqueue* pqueue)
 
 static int
 posixaio_backend_init_queue(tqueue *pqueue, int size,
-		   int drv, struct tfilter *filter)
+		   int drv, struct tfilter *filter, int qid)
 {
 	int err;
 	*pqueue = (tqueue)malloc(sizeof(posix_aio_queue));
@@ -466,7 +469,7 @@ posixaio_backend_init_queue(tqueue *pqueue, int size,
 	if (!size)
 		return 0;
 
-	err = posixaio_backend_queue_init_io(queue, drv);
+	err = posixaio_backend_queue_init_io(queue, drv, qid);
 	if (err){
 		WARN("error from posixaio_backend_queue_init_io\n");
 		goto fail;
