@@ -109,6 +109,14 @@ enum TD_OPS{
 #define td_flag_clear(word, flag)    ((word) &= ~(flag))
 #define td_flag_test(word, flag)     ((word) & (flag))
 
+#include <stdatomic.h>
+
+typedef _Atomic uint32_t             td_atomic_flag_t;
+
+#define td_atomic_flag_set(word, flag)   atomic_fetch_or(&(word), (flag))
+#define td_atomic_flag_clear(word, flag) atomic_fetch_and(&(word), ~(flag))
+#define td_atomic_flag_test(word, flag)  (atomic_load(&(word)) & (flag))
+
 #define TD_BLOCK_STATE_NONE  0
 #define TD_BLOCK_STATE_HOLE  (1 <<0)
 #define TD_BLOCK_STATE_ZERO  (1 <<1)

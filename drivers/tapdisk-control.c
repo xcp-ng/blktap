@@ -558,7 +558,7 @@ tapdisk_control_list(struct tapdisk_ctl_conn *conn,
 	list_for_each_entry(vbd, head, next) {
 		response->u.list.count   = count--;
 		response->u.list.minor   = vbd->tap ? vbd->tap->minor : -1;
-		response->u.list.state   = vbd->state;
+		response->u.list.state   = atomic_load(&vbd->state);
 		response->u.list.path[0] = 0;
 
 		if (vbd->name)
@@ -885,7 +885,7 @@ tapdisk_control_close_image(struct tapdisk_ctl_conn *conn,
  		goto out;
  	}
 
-	if (td_flag_test(vbd->state, TD_VBD_PAUSED))
+	if (td_atomic_flag_test(vbd->state, TD_VBD_PAUSED))
 		EPRINTF("closing paused VBD %d", request->cookie);
 
 	if (tapdisk_vbd_failed_queues(vbd))

@@ -300,7 +300,7 @@ tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
         if (tapdisk_xenblkif_reqs_pending(queue)) {
             RING_DEBUG(blkif, "disconnect from ring with %d pending requests\n",
                        queue->ring_size - queue->n_reqs_free);
-            if (td_flag_test(queue->blkif->vbd->state, TD_VBD_PAUSED))
+            if (td_atomic_flag_test(queue->blkif->vbd->state, TD_VBD_PAUSED))
                 RING_ERR(blkif, "disconnect from ring with %d pending requests "
                          "and the VBD paused\n",
                          queue->ring_size - queue->n_reqs_free);
