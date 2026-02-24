@@ -92,8 +92,9 @@ struct td_vbd_handle {
 
 	/**
 	 * VBD state (TD_VBD_XXX, excluding SECONDARY and request-related)
+	 * Atomic: read lock-free from IO threads, written from control path.
 	 */
-	td_flag_t                   state;
+	td_atomic_flag_t            state;
 
 	/**
 	 * List of images: the leaf is at the head, the tree root is at the tail.
