@@ -155,6 +155,7 @@ static inline td_image_t *
 tapdisk_vbd_first_image(td_vbd_t *vbd)
 {
 	td_image_t *image = NULL;
+	// FIXME: no lock here ?
 	if (!list_empty(&vbd->images))
 		image = list_entry(vbd->images.next, td_image_t, next);
 	return image;
@@ -1469,6 +1470,7 @@ __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
 
 	if (err != -EBUSY) {
 		int write = treq.op == TD_OP_WRITE;
+		// FIXME: should we take a lock here for stats ? or use an atomic ?
 		td_sector_count_add(&image->stats.hits, treq.secs, write);
 		if (err)
 			td_sector_count_add(&image->stats.fail, treq.secs, write);
@@ -1527,6 +1529,8 @@ __tapdisk_vbd_reissue_td_request(td_vbd_queue_t* queue,
 	/*
 	 * If intellicache is enabled, check to confirm  mirroring
 	 * is disabled due to out of space.
+	 * NOTE: vbd->retired may be written concurrently from
+	 * tapdisk_vbd_complete_td_request() without vbd->mutex.
 	 */
 	if (unlikely(vbd->retired && vbd->retired == image))
 		parent = tapdisk_vbd_first_image(vbd);
@@ -1673,6 +1677,17 @@ tapdisk_vbd_complete_td_request(td_request_t treq, int res)
 	td_vbd_request_t *vreq;
 	td_vbd_queue_t *queue;
 
+	/*
+	 * WARNING: pre-existing data races.
+	 * The ENOSPC and NBD-failure paths below mutate vbd->images list,
+	 * vbd->secondary, vbd->secondary_mode, and vbd->retired without
+	 * holding vbd->mutex. These fields are concurrently read by:
+	 *   - __tapdisk_vbd_reissue_td_request(): vbd->retired, images list
+	 *   - tapdisk_vbd_issue_request(): vbd->secondary_mode, vbd->secondary
+	 * This is safe in practice only because these error paths are rare
+	 * (ENOSPC on mirror, NBD timeout). A proper fix would take vbd->mutex
+	 * here and in the matching read sites.
+	 */
 	image = treq.image;
 	vreq  = treq.vreq;
 	queue = vreq->vqueue;
@@ -1781,6 +1796,10 @@ tapdisk_vbd_issue_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 		treq.vreq           = vreq;
 
 
+		/*
+		 * NOTE: vbd->secondary_mode may be written concurrently from
+		 * tapdisk_vbd_complete_td_request() without vbd->mutex.
+		 */
 		pthread_mutex_lock(&queue->mutex);
 		vreq->secs_pending  += iov->secs;
 		queue->secs_pending += iov->secs;
