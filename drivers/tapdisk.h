@@ -179,8 +179,8 @@ struct td_vbd_request {
 	int                         error;
 	int                         prev_error;
 
-	int                         submitting;
-	int                         secs_pending;
+	_Atomic int                 submitting;
+	_Atomic int                 secs_pending;
 	int                         num_retries;
 	struct timeval		    ts;
 	struct timeval              last_try;
