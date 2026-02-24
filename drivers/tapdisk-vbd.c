@@ -867,17 +867,15 @@ tapdisk_vbd_shutdown(td_vbd_t *vbd)
 		"failed: 0x%02x, completed: 0x%02x\n",
 		vbd->name, vbd->state, new, pending, failed, completed);
 
-	DPRINTF("errors: 0x%04"PRIx64", "
-		"retries: 0x%04"PRIx64", received: 0x%08"PRIx64", "
-		"returned: 0x%08"PRIx64", kicked: 0x%08"PRIx64"\n",
-		vbd->errors, vbd->retries, vbd->received, vbd->returned,
-		vbd->kicked);
-
 	for (int i = 0; i < ARRAY_SIZE(vbd->queues); i++) {
 		td_vbd_queue_t* queue = &vbd->queues[i];
-		DPRINTF("queue #%d : last activity: %010ld.%06ld\n",
+		DPRINTF("queue #%d : last activity: %010ld.%06ld, errors: 0x%04"PRIx64", "
+			"retries: 0x%04"PRIx64", received: 0x%08"PRIx64", "
+			"returned: 0x%08"PRIx64", kicked: 0x%08"PRIx64"\n",
 			i,
-			queue->ts.tv_sec, queue->ts.tv_usec);
+			queue->ts.tv_sec, queue->ts.tv_usec,
+			queue->errors, queue->retries, queue->received, queue->returned,
+			queue->kicked);
 	}
 
 	tapdisk_vbd_close_vdi(vbd);
@@ -951,19 +949,19 @@ tapdisk_vbd_debug(td_vbd_t *vbd)
 	tapdisk_vbd_queue_count(vbd, &new, &pending, &failed, &completed);
 
 	DBG(TLOG_WARN, "%s: state: 0x%08x, new: 0x%02x, pending: 0x%02x, "
-	    "failed: 0x%02x, completed: 0x%02x, "
-	    "errors: 0x%04"PRIx64", retries: 0x%04"PRIx64", "
-	    "received: 0x%08"PRIx64", returned: 0x%08"PRIx64", "
-	    "kicked: 0x%08"PRIx64"\n",
-	    vbd->name, vbd->state, new, pending, failed, completed,
-	    vbd->errors, vbd->retries,
-	    vbd->received, vbd->returned, vbd->kicked);
+	    "failed: 0x%02x, completed: 0x%02x\n",
+	    vbd->name, vbd->state, new, pending, failed, completed);
 
 	for (int i = 0; i < ARRAY_SIZE(vbd->queues); i++) {
 		td_vbd_queue_t* queue = &vbd->queues[i];
-		DBG(TLOG_WARN, "%s: queue #%d : last activity: %010ld.%06ld\n",
-		    vbd->name, i,
-		    queue->ts.tv_sec, queue->ts.tv_usec);
+		DBG(TLOG_WARN, "%s: queue #%d : state: 0x%08x, new: 0x%02x, pending: 0x%02x, "
+		    "failed: 0x%02x, completed: 0x%02x, last activity: %010ld.%06ld, "
+		    "errors: 0x%04"PRIx64", retries: 0x%04"PRIx64", "
+		    "received: 0x%08"PRIx64", returned: 0x%08"PRIx64", "
+		    "kicked: 0x%08"PRIx64"\n",
+		    vbd->name, i, vbd->state, new, pending, failed, completed,
+		    queue->ts.tv_sec, queue->ts.tv_usec, queue->errors, queue->retries,
+		    queue->received, queue->returned, queue->kicked);
 	}
 
 	tapdisk_vbd_for_each_image(vbd, image, tmp)
@@ -1518,7 +1516,7 @@ __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
 				op_strings[treq.op],
 				image->name,
 				treq.secs, treq.sec, strerror(abs(err)));
-		queue->vbd->errors++;
+		queue->errors++;
 	}
 
 	interval = timeval_to_us(&queue->ts) - timeval_to_us(&ts);
@@ -1926,8 +1924,7 @@ tapdisk_vbd_reissue_failed_requests(td_vbd_queue_t *queue)
 		    now.tv_sec - vreq->last_try.tv_sec < TD_VBD_RETRY_INTERVAL)
 			continue;
 
-		// FIXME: lock VBD or atomics ?  (only for display or stats)
-		vbd->retries++;
+		queue->retries++;
 		vreq->num_retries++;
 
 		vreq->prev_error = vreq->error;
@@ -2089,7 +2086,7 @@ tapdisk_vbd_queue_request(td_vbd_t *vbd, td_vbd_request_t *vreq, td_queue_id_t q
 	pthread_mutex_lock(&queue->mutex);
 	list_add_tail(&vreq->next, &queue->new_requests);
 	vreq->list_head = &queue->new_requests;
-	vbd->received++;
+	queue->received++;
 	pthread_mutex_unlock(&queue->mutex);
 
 #if 0  // TODO: to be removed
@@ -2108,7 +2105,7 @@ tapdisk_vbd_kick(td_vbd_queue_t *queue, bool scheduler_kick)
 	ssize_t s;
 	td_vbd_t *vbd = queue->vbd;
 
-	vbd->kicked++;
+	queue->kicked++;
 
 	pthread_mutex_lock(&queue->mutex);
 	list = &queue->completed_requests;
@@ -2133,7 +2130,7 @@ tapdisk_vbd_kick(td_vbd_queue_t *queue, bool scheduler_kick)
 
 				// FIXME: callback was initially called with vbd->mutex locked
 				prev->cb(prev, prev->error, prev->token, 0);
-				vbd->returned++;
+				queue->returned++;
 
 				list_del(&vreq->next);
 				prev = vreq;
@@ -2142,7 +2139,7 @@ tapdisk_vbd_kick(td_vbd_queue_t *queue, bool scheduler_kick)
 
 		// FIXME: callback was initially called with vbd->mutex locked
 		prev->cb(prev, prev->error, prev->token, 1);
-		vbd->returned++;
+		queue->returned++;
 	}
 
 	if (scheduler_kick && td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED)) {

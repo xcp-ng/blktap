@@ -132,18 +132,19 @@ struct td_vbd_handle {
 		int		    efd;
 		event_id_t          event;
 		struct td_vbd_handle* vbd;
+
+		/* Per-queue counters (lock-free, single-writer per queue) */
+		uint64_t            received;
+		uint64_t            returned;
+		uint64_t            kicked;
+		uint64_t            retries;
+		uint64_t            errors;
 	} queues[BLKIF_MAX_QUEUES];
 	pthread_mutex_t             mutex;
 
 	struct list_head            next;
 
 	uint16_t                    req_timeout; /* in seconds */
-
-	uint64_t                    received;   /* only for debug or display */
-	uint64_t                    returned;   /* only for debug or display */
-	uint64_t                    kicked;     /* only for debug or display */
-	uint64_t                    retries;    /* only for debug or display */
-	uint64_t                    errors;     /* only for debug or display */
 
 	struct td_nbdserver        *nbdserver;
 	struct td_nbdserver        *nbdserver_new;
