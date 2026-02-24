@@ -126,7 +126,7 @@ struct td_vbd_handle {
 		struct list_head    failed_requests;
 		struct list_head    completed_requests;
 		struct timeval      ts;
-		uint64_t            secs_pending;
+		_Atomic uint64_t    secs_pending;
 		td_sector_count_t   secs;
 		pthread_mutex_t     mutex;
 		bool                watchdog_warned;

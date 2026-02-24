@@ -1418,7 +1418,7 @@ tapdisk_vbd_request_should_retry(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 static bool
 tapdisk_vbd_complete_vbd_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 {
-	if (!vreq->submitting && !vreq->secs_pending) {
+	if (!atomic_load(&vreq->submitting) && !atomic_load(&vreq->secs_pending)) {
 		if (vreq->error &&
 		    tapdisk_vbd_request_should_retry(queue, vreq))
 			tapdisk_vbd_move_request(vreq, &queue->failed_requests);
@@ -1462,8 +1462,8 @@ __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
 	old_error = vreq->error;
 	prev_error = vreq->prev_error;
 
-	queue->secs_pending -= treq.secs;
-	vreq->secs_pending  -= treq.secs;
+	atomic_fetch_sub(&queue->secs_pending, treq.secs);
+	atomic_fetch_sub(&vreq->secs_pending, treq.secs);
 
 	notify = tapdisk_vbd_complete_vbd_request(queue, vreq);
 	pthread_mutex_unlock(&queue->mutex);
@@ -1515,7 +1515,7 @@ __tapdisk_vbd_reissue_td_request(td_vbd_queue_t* queue,
 
 	gettimeofday(&vreq->last_try, NULL);
 
-	vreq->submitting++;
+	atomic_fetch_add(&vreq->submitting, 1);
 
 	if (tapdisk_vbd_is_last_image(vbd, image)) {
 		if (unlikely(treq.op == TD_OP_BLOCK_STATUS)) {
@@ -1573,8 +1573,8 @@ __tapdisk_vbd_reissue_td_request(td_vbd_queue_t* queue,
 
 done:
 	pthread_mutex_lock(&queue->mutex);
-	vreq->submitting--;
-	if (!vreq->secs_pending)
+	atomic_fetch_sub(&vreq->submitting, 1);
+	if (!atomic_load(&vreq->secs_pending))
 		tapdisk_vbd_complete_vbd_request(queue, vreq);
 	pthread_mutex_unlock(&queue->mutex);
 }
@@ -1759,7 +1759,7 @@ tapdisk_vbd_issue_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 	image  = tapdisk_vbd_first_image(vbd);
 
 	pthread_mutex_lock(&queue->mutex);
-	vreq->submitting = 1;
+	atomic_store(&vreq->submitting, 1);
 
 	tapdisk_vbd_mark_progress(queue);
 	vreq->last_try = queue->ts;
@@ -1800,17 +1800,15 @@ tapdisk_vbd_issue_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 		 * NOTE: vbd->secondary_mode may be written concurrently from
 		 * tapdisk_vbd_complete_td_request() without vbd->mutex.
 		 */
-		pthread_mutex_lock(&queue->mutex);
-		vreq->secs_pending  += iov->secs;
-		queue->secs_pending += iov->secs;
+		atomic_fetch_add(&vreq->secs_pending, iov->secs);
+		atomic_fetch_add(&queue->secs_pending, iov->secs);
 		if (vbd->secondary_mode == TD_VBD_SECONDARY_MIRROR &&
 		    vreq->op == TD_OP_WRITE &&
 			likely(vreq->skip_mirror == false))
 		{
-			vreq->secs_pending  += iov->secs;
-			queue->secs_pending += iov->secs;
+			atomic_fetch_add(&vreq->secs_pending, iov->secs);
+			atomic_fetch_add(&queue->secs_pending, iov->secs);
 		}
-		pthread_mutex_unlock(&queue->mutex);
 
 		switch (vreq->op) {
 		case TD_OP_WRITE:
@@ -1857,8 +1855,8 @@ tapdisk_vbd_issue_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 
 out:
 	pthread_mutex_lock(&queue->mutex);
-	vreq->submitting--;
-	if (!vreq->secs_pending) {
+	atomic_fetch_sub(&vreq->submitting, 1);
+	if (!atomic_load(&vreq->secs_pending)) {
 		err = (err ? : vreq->error);
 		tapdisk_vbd_complete_vbd_request(queue, vreq);
 	}
@@ -1890,7 +1888,7 @@ tapdisk_vbd_reissue_failed_requests(td_vbd_queue_t *queue)
 
 	pthread_mutex_lock(&queue->mutex);
 	tapdisk_vbd_for_each_request(vreq, tmp, &queue->failed_requests) {
-		if (vreq->secs_pending)
+		if (atomic_load(&vreq->secs_pending))
 			continue;
 
 		if (td_atomic_flag_test(vbd->state, TD_VBD_SHUTDOWN_REQUESTED)) {
