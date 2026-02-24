@@ -2216,17 +2216,23 @@ void
 tapdisk_vbd_stats(td_vbd_t *vbd, td_stats_t *st)
 {
 	td_image_t *image, *next;
-    struct td_xenblkif *blkif;
+	struct td_xenblkif *blkif;
 	const bool read_caching =
 		TD_OPEN_NO_O_DIRECT == (vbd->flags & TD_OPEN_NO_O_DIRECT);
 
 	tapdisk_stats_enter(st, '{');
 	tapdisk_stats_field(st, "name", "s", vbd->name);
 
-	// TODO: sum every queues instead of using only first queue
 	tapdisk_stats_field(st, "secs", "[");
-	tapdisk_stats_val(st, "llu", vbd->queues[0].secs.rd);
-	tapdisk_stats_val(st, "llu", vbd->queues[0].secs.wr);
+	{
+		uint64_t secs_rd = 0, secs_wr = 0;
+		for (int i = 0; i < BLKIF_MAX_QUEUES; i++) {
+			secs_rd += vbd->queues[i].secs.rd;
+			secs_wr += vbd->queues[i].secs.wr;
+		}
+		tapdisk_stats_val(st, "llu", secs_rd);
+		tapdisk_stats_val(st, "llu", secs_wr);
+	}
 	tapdisk_stats_leave(st, ']');
 
 	tapdisk_stats_field(st, "images", "[");
