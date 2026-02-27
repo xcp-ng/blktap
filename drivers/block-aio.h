@@ -20,6 +20,7 @@
 #ifndef __BLOCK_AIO_H__
 #define __BLOCK_AIO_H__
 
+#include <pthread.h>
 #include "tapdisk.h"
 
 
@@ -37,6 +38,7 @@ struct tdaio_state {
 	int                  fd;
 	td_driver_t         *driver;
 
+	pthread_mutex_t      aio_lock;
 	int                  aio_free_count;
 	struct aio_request   aio_requests[MAX_AIO_REQS];
 	struct aio_request  *aio_free_list[MAX_AIO_REQS];
