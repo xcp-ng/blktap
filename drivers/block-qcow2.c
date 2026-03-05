@@ -474,6 +474,10 @@ qcow2_open(void *opaque)
 
     qcow2_deinit();
 
+    pthread_mutex_lock(&s->lock);
+    pthread_cond_signal(&s->cond);
+    pthread_mutex_unlock(&s->lock);
+
     return NULL;
 fail:
     blk_unref(conf->blk);
@@ -481,12 +485,13 @@ fail1:
     EPRINTF("open error: %s\n", error_get_pretty(local_err));
     error_free(local_err);
 
+    qcow2_deinit();
+
     pthread_mutex_lock(&s->lock);
     s->open_status = -EINVAL;
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
-    qcow2_deinit();
     return NULL;
 }
 
@@ -551,6 +556,10 @@ _qcow2_close(td_driver_t *driver)
     pthread_mutex_unlock(&s->lock);
 
     qemu_bh_schedule(s->bh);
+
+    pthread_mutex_lock(&s->lock);
+    pthread_cond_wait(&s->cond, &s->lock);
+    pthread_mutex_unlock(&s->lock);
 
     // Ignore return, qcow2_open() always return NULL; or will abort
     qemu_thread_join(&s->thread);
