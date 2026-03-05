@@ -235,7 +235,7 @@ qcow2_initialize(struct qcow2_state *s, Error **perr)
 }
 
 static void
-qcow2_free(struct qcow2_state *s)
+qcow2_deinit()
 {
         qemu_deinit_main_loop();
 
@@ -472,7 +472,7 @@ qcow2_open(void *opaque)
 
     drain_call_rcu();
 
-    qcow2_free(s);
+    qcow2_deinit();
 
     return NULL;
 fail:
@@ -486,7 +486,7 @@ fail1:
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
-    qcow2_free(s);
+    qcow2_deinit();
     return NULL;
 }
 
