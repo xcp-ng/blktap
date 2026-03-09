@@ -957,6 +957,15 @@ int
 tapdisk_server_complete(void)
 {
 	int err;
+	sigset_t set;
+
+	sigemptyset(&set);
+	sigaddset(&set, SIGBUS);
+	sigaddset(&set, SIGXFSZ);
+	sigaddset(&set, SIGUSR1);
+	sigaddset(&set, SIGUSR2);
+	sigaddset(&set, SIGHUP);
+	pthread_sigmask(SIG_BLOCK, &set, NULL);
 
 	server.rw_backend = get_libaio_backend();
 	server.ro_backend = get_libaio_backend();
