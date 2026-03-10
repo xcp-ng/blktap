@@ -66,11 +66,6 @@ typedef struct tapdisk_server {
 	char                        *name;
 	char                        *ident;
 	int                          facility;
-#if 0
-	event_id_t                   wake_event;
-	int                          wake_event_fd;
-	uint64_t                     wake_event_count;
-#endif
 
 	/* IO threads states */
 	struct {
@@ -78,7 +73,6 @@ typedef struct tapdisk_server {
 		char                 name[16];
 		event_id_t           eventid;
 		int                  eventfd;
-		uint64_t             eventfd_count;
 		scheduler_t          scheduler;
 	} io_threads[TAPDISK_MAX_VBD_THREADS];
 
@@ -243,16 +237,15 @@ tapdisk_server_mask_event(event_id_t event, int masked)
 }
 
 void
-tapdisk_server_set_max_timeout(int seconds)
+tapdisk_server_set_max_timeout(struct timeval tv)
 {
-	scheduler_set_max_timeout(&server.scheduler, TV_SECS(seconds));
+	scheduler_set_max_timeout(&server.scheduler, tv);
 }
 
-#define IO_THREAD_WAKE
-#ifdef IO_THREAD_WAKE
 static
 void tapdisk_server_io_thread_wake(td_queue_id_t qid)
 {
+	uint64_t token = 1;
 	int n;
 
 	// XXX: thread_wake might called by IO backend before IO threads are fully
@@ -260,22 +253,24 @@ void tapdisk_server_io_thread_wake(td_queue_id_t qid)
 	if (server.io_threads[qid].eventfd == -1)
 		return;
 
-	server.io_threads[qid].eventfd_count++;
-	n = write(server.io_threads[qid].eventfd,
-		  &server.io_threads[qid].eventfd_count,
-		  sizeof(server.io_threads[qid].eventfd_count));
+	n = write(server.io_threads[qid].eventfd, &token, sizeof(token));
 	ASSERT(n == 8);
 }
-#endif
 
 void tapdisk_server_io_thread_handler(event_id_t id, char mode __attribute__((unused)), void *private)
 {
-	long qid = (long)private;
-	uint64_t w = 0;
-	int err;
+	td_queue_id_t qid = (td_queue_id_t)(long)private;
+	uint64_t cnt;
+	int n;
 
-	err = read(server.io_threads[qid].eventfd, &w, sizeof(w));
-	ASSERT(err == 8);
+	n = read(server.io_threads[qid].eventfd, &cnt, sizeof(cnt));
+	ASSERT(n == 8);
+}
+
+void
+tapdisk_server_io_scheduler_wake(td_queue_id_t qid)
+{
+	tapdisk_server_io_thread_wake(qid);
 }
 
 event_id_t
@@ -288,10 +283,8 @@ tapdisk_server_register_io_event(td_queue_id_t qid, char mode, int fd,
 	eid =  scheduler_register_event(&server.io_threads[qid].scheduler,
 					mode, fd, timeout, cb, data);
 
-#ifdef IO_THREAD_WAKE
 	/* Wake thread to use the newly registered event */
 	tapdisk_server_io_thread_wake(qid);
-#endif
 
 	return eid;
 }
@@ -317,27 +310,6 @@ tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int seconds)
 	scheduler_set_max_timeout(&server.io_threads[qid].scheduler, TV_SECS(seconds));
 }
 
-#if 0   // TODO: to be removed
-void
-tapdisk_server_scheduler_wake(void)
-{
-	int n;
-	server.wake_event_count++;
-	n = write(server.wake_event_fd,
-		  &server.wake_event_count,
-		  sizeof(server.wake_event_count));
-	ASSERT(n == 8);
-}
-
-static void
-tapdisk_server_scheduler_wake_handler(event_id_t id, char mode __attribute__((unused)), void *private)
-{
-	uint64_t cnt;
-	int n;
-	n = read(server.wake_event_fd, &cnt, sizeof(cnt));
-	ASSERT(n == 8);
-}
-#endif
 
 static void
 tapdisk_server_set_retry_timeout(td_queue_id_t qid)
@@ -392,7 +364,7 @@ tapdisk_server_check_vbds(td_queue_id_t qid)
 	td_vbd_t *vbd, *tmp;
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_check_state(&vbd->queues[qid]);
+		tapdisk_vbd_process_queue(&vbd->queues[qid]);
 }
 
 /**
@@ -413,15 +385,6 @@ tapdisk_server_recheck_vbds(td_queue_id_t qid)
 	}
 
 	return rv;
-}
-
-static void
-tapdisk_server_stop_vbds(void)
-{
-	td_vbd_t *vbd, *tmp;
-
-	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_kill_queue(vbd);
 }
 
 static int
@@ -554,18 +517,23 @@ __tapdisk_io_thread_run(void* arg)
 void
 tapdisk_server_iterate(void)
 {
+	td_vbd_t *vbd, *tmp;
 	int ret;
 
 	ret = scheduler_wait_for_events(&server.scheduler);
 	if (ret < 0)
 		DBG(TLOG_WARN, "server wait returned %s\n", strerror(-ret));
+
+	tapdisk_server_for_each_vbd(vbd, tmp)
+		tapdisk_vbd_check_state(vbd);
 }
 
 static void
 __tapdisk_server_run(void)
 {
-	while (server.run)
+	while (server.run) {
 		tapdisk_server_iterate();
+	}
 }
 
 static void
@@ -594,7 +562,10 @@ tapdisk_server_signal_handler(event_id_t id, char mode __attribute__((unused)), 
 
 		case SIGXFSZ:
 			ERR(EFBIG, "received SIGXFSZ");
-			tapdisk_server_stop_vbds();
+
+			tapdisk_server_for_each_vbd(vbd, tmp)
+				tapdisk_vbd_kill_queue(vbd);
+
 			if (xfsz_error_sent)
 				break;
 
@@ -922,10 +893,6 @@ tapdisk_server_init(void)
 
 	server.tlog_reopen_evid = -1;
 	server.signal_handler_evid = -1;
-#if 0  // TODO: to be removed
-	server.wake_event = -1;
-	server.wake_event_fd = -1;
-#endif
 
 	scheduler_initialize(&server.scheduler);
 
@@ -982,24 +949,23 @@ tapdisk_server_complete(void)
 		pthread_t tid;
 		int fd;
 
+		/* Wake IO thread mecanism */
 		fd = eventfd(0, 0);
 		if (fd < 0) {
 			EPRINTF("Failed to create eventfd: %s\n", strerror(errno));
 			goto fail;
 		}
 		server.io_threads[qid].eventfd = fd;
-		server.io_threads[qid].eventfd_count = 0;
 
-		/* FIXME: register_io_event ? */
-		int event = scheduler_register_event(&server.io_threads[qid].scheduler,
-						     SCHEDULER_POLL_READ_FD,
-						     server.io_threads[qid].eventfd,
-						     TV_INF,
-						     tapdisk_server_io_thread_handler,
-						     (void*)(long)qid);
-		//scheduler_mask_event(&server.io_threads[qid].scheduler, event, false);
-		server.io_threads[qid].eventid = event;
+		server.io_threads[qid].eventid =
+			tapdisk_server_register_io_event(qid,
+							 SCHEDULER_POLL_READ_FD,
+							 server.io_threads[qid].eventfd,
+							 TV_INF,
+							 tapdisk_server_io_thread_handler,
+							 (void*)(long)qid);
 
+		/* Create thread */
 		err = pthread_create(&tid , NULL, __tapdisk_io_thread_run, (void*)(unsigned long)qid);
 		if (err) {
 			EPRINTF("Failed to create IO thread #%d\n", qid);
@@ -1012,19 +978,6 @@ tapdisk_server_complete(void)
 		pthread_setname_np(tid, server.io_threads[qid].name);
 	}
 
-#if 0  // TODO: to be removed
-	server.wake_event_fd = eventfd(0, 0);
-	server.wake_event_count = 0;
-	ASSERT(server.wake_event_fd >= 0);
-
-	server.wake_event = scheduler_register_event(&server.scheduler,
-						     SCHEDULER_POLL_READ_FD,
-						     server.wake_event_fd,
-						     TV_INF,
-						     tapdisk_server_scheduler_wake_handler,
-						     NULL);
-#endif
-
 	server.run = 1;
 
 	return 0;
@@ -1033,11 +986,11 @@ fail:
 	for (int qid = 0; qid < ARRAY_SIZE(server.io_threads); qid++) {
 		if (server.io_threads[qid].tid)
 			pthread_cancel(server.io_threads[qid].tid);
+
 		if (server.io_threads[qid].eventfd != -1)
 			close(server.io_threads[qid].eventfd);
 
-		scheduler_unregister_event(&server.io_threads[qid].scheduler,
-					   server.io_threads[qid].eventid);
+		tapdisk_server_unregister_io_event(qid, server.io_threads[qid].eventid);
 	}
 
 	tapdisk_server_close_tlog();

@@ -890,6 +890,9 @@ tapdisk_vbd_free(td_vbd_t *vbd)
 	free(vbd);
 }
 
+/*
+ * Also called from server on SIGBUS.
+ */
 int
 tapdisk_vbd_close(td_vbd_t *vbd)
 {
@@ -1004,7 +1007,7 @@ tapdisk_vbd_lock(td_vbd_t *vbd)
 	return 0;
 }
 
-int
+static int
 tapdisk_vbd_quiesce_queue(td_vbd_t *vbd)
 {
 	bool any_pending = tapdisk_vbd_pending_queues(vbd);
@@ -1167,7 +1170,7 @@ resume_failed:
 	td_atomic_flag_clear(vbd->state, TD_VBD_PAUSE_REQUESTED);
 
 	for (int i = 0; i < ARRAY_SIZE(vbd->queues); i++)
-		tapdisk_vbd_check_state(&vbd->queues[i]);
+		tapdisk_vbd_process_queue(&vbd->queues[i]);
 
 	if (vbd->nbdserver)
 		tapdisk_nbdserver_unpause(vbd->nbdserver);
@@ -1291,23 +1294,18 @@ tapdisk_vbd_check_requests_for_issue(td_vbd_queue_t* queue)
 		tapdisk_vbd_issue_requests(queue);
 }
 
+/*
+ * Called by IO threads — per-queue work only.
+ * Never calls VBD-global operations (pause, close, shutdown).
+ */
 void
-tapdisk_vbd_check_state(td_vbd_queue_t *queue)
+tapdisk_vbd_process_queue(td_vbd_queue_t *queue)
 {
-	struct td_xenblkif *blkif;
 	td_vbd_t *vbd = queue->vbd;
-
-	// TODO: what about lock ?
 
 	/* Don't check if we're already quiesced */
 	if (td_atomic_flag_test(vbd->state, TD_VBD_QUIESCED))
 		return;
-
-	/*
-	 * TODO don't ignore return value
-	 */
-	list_for_each_entry(blkif, &vbd->rings, entry)
-		tapdisk_xenblkif_ring_stats_update(blkif);
 
 	tapdisk_vbd_check_complete_requests(queue);
 
@@ -1316,6 +1314,21 @@ tapdisk_vbd_check_state(td_vbd_queue_t *queue)
 	{
 		tapdisk_vbd_check_requests_for_issue(queue);
 	}
+}
+
+/*
+ * Called by main thread only — handles VBD-global state transitions.
+ */
+void
+tapdisk_vbd_check_state(td_vbd_t *vbd)
+{
+	struct td_xenblkif *blkif;
+
+	if (td_atomic_flag_test(vbd->state, TD_VBD_QUIESCED))
+		return;
+
+	list_for_each_entry(blkif, &vbd->rings, entry)
+		tapdisk_xenblkif_ring_stats_update(blkif);
 
 	if (td_atomic_flag_test(vbd->state, TD_VBD_QUIESCE_REQUESTED))
 		tapdisk_vbd_quiesce_queue(vbd);
