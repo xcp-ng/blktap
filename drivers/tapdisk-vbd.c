@@ -50,6 +50,7 @@
 #define ERR(_err, _f, _a...) tlog_error(_err, _f, ##_a)
 
 #define INFO(_f, _a...)            tlog_syslog(TLOG_INFO, "vbd: " _f, ##_a)
+#define WARN(_f, _a...)            tlog_syslog(TLOG_WARN, "WARNING: vbd: "_f, ##_a)
 #define ERROR(_f, _a...)           tlog_syslog(TLOG_WARN, "vbd: " _f, ##_a)
 
 #define TD_VBD_EIO_RETRIES          10
@@ -269,18 +270,18 @@ tapdisk_vbd_release_queues_event(td_vbd_t *vbd)
 void
 tapdisk_vbd_close_vdi(td_vbd_t *vbd)
 {
-    int err;
+	int err;
 
-    err = vbd_stats_destroy(vbd);
-    if (err) {
-        EPRINTF("failed to destroy RRD stats file: %s (error ignored)\n",
-                strerror(-err));
-    }
+	err = vbd_stats_destroy(vbd);
+	if (err) {
+		EPRINTF("failed to destroy RRD stats file: %s (error ignored)\n",
+			strerror(-err));
+	}
 
-    err = td_metrics_vdi_stop(&vbd->vdi_stats);
-    if (err) {
-        EPRINTF("failed to destroy stats file: %s\n", strerror(-err));
-    }
+	err = td_metrics_vdi_stop(&vbd->vdi_stats);
+	if (err) {
+		EPRINTF("failed to destroy stats file: %s\n", strerror(-err));
+	}
 
 	tapdisk_image_close_chain(&vbd->images);
 
@@ -984,10 +985,9 @@ tapdisk_vbd_get_disk_info(td_vbd_t *vbd, td_disk_info_t *info)
 static bool
 tapdisk_vbd_queue_ready(td_vbd_t *vbd)
 {
-	return (!td_atomic_flag_test(vbd->state, TD_VBD_DEAD) &&
-		!td_atomic_flag_test(vbd->state, TD_VBD_CLOSED) &&
-		!td_atomic_flag_test(vbd->state, TD_VBD_QUIESCED) &&
-		!td_atomic_flag_test(vbd->state, TD_VBD_QUIESCE_REQUESTED));
+	uint32_t state = atomic_load(&vbd->state);
+	return !(state & (TD_VBD_DEAD | TD_VBD_CLOSED |
+			  TD_VBD_QUIESCED | TD_VBD_QUIESCE_REQUESTED));
 }
 
 bool
@@ -1109,7 +1109,7 @@ tapdisk_vbd_pause(td_vbd_t *vbd)
 	INFO("pause completed\n");
 
 	if (tapdisk_vbd_failed_queues(vbd))
-		INFO("warning: failed requests pending\n");
+		WARN("failed requests pending\n");
 
 	td_atomic_flag_clear(vbd->state, TD_VBD_PAUSE_REQUESTED);
 	td_atomic_flag_set(vbd->state, TD_VBD_PAUSED);

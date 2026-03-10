@@ -660,7 +660,8 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
 
     list_add_tail(&td_blkif->entry, &vbd->rings);
     if (td_blkif->queues[0].ctx) {
-        /* TODO: not very satisfied by this */
+        /* XXX: access to the shared context through the first queue which
+                always exists; not very satisfied by this...  */
         struct td_xenio_shared_ctx* ctx = td_blkif->queues[0].ctx->shared;
         list_add_tail(&td_blkif->entry_ctx, &ctx->blkifs);
     }
