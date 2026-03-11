@@ -1683,8 +1683,8 @@ tapdisk_vbd_complete_block_status_request(td_request_t treq, int res)
 	return __tapdisk_vbd_complete_td_request(queue, vreq, treq, res);
 }
 
-int
-tapdisk_vbd_complete_td_request(td_request_t treq, int res)
+static int
+tapdisk_vbd_complete_td_request_cb(td_request_t treq, int res)
 {
 	td_vbd_t *vbd;
 	td_image_t *image, *leaf;
@@ -1805,7 +1805,7 @@ tapdisk_vbd_issue_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq)
 		treq.sec            = sec;
 		treq.secs           = iov->secs;
 		treq.image          = image;
-		treq.cb             = tapdisk_vbd_complete_td_request;
+		treq.cb             = tapdisk_vbd_complete_td_request_cb;
 		treq.cb_data        = NULL;
 		treq.vreq           = vreq;
 
