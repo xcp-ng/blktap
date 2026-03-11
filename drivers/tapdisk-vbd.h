@@ -229,7 +229,6 @@ int tapdisk_vbd_commit(td_vbd_t *, const char *);
 int tapdisk_vbd_query_commit_job(td_vbd_t *, td_query_t *);
 int tapdisk_vbd_cancel_commit_job(td_vbd_t *, bool);
 
-int tapdisk_vbd_complete_td_request(td_request_t, int);
 int add_extent(tapdisk_extents_t *, td_request_t *);
 int tapdisk_vbd_issue_request(td_vbd_queue_t *, td_vbd_request_t *);
 
