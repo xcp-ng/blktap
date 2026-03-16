@@ -26,6 +26,7 @@
 
 int tap_ctl_info(pid_t pid, unsigned long long *sectors,
                  unsigned int *sector_size, unsigned int *info, unsigned int *max_queues,
+                 bool *discard, unsigned int *discard_granularity,
                  const int minor)
 {
     tapdisk_message_t message;
@@ -34,10 +35,12 @@ int tap_ctl_info(pid_t pid, unsigned long long *sectors,
     ASSERT(sectors);
     ASSERT(sector_size);
     ASSERT(info);
+    ASSERT(discard);
+    ASSERT(discard_granularity);
 
     memset(&message, 0, sizeof(message));
     message.type = TAPDISK_MESSAGE_DISK_INFO;
-	message.cookie = minor;
+    message.cookie = minor;
 
     err = tap_ctl_connect_send_and_receive(pid, &message, NULL);
     if (err) {
@@ -51,6 +54,8 @@ int tap_ctl_info(pid_t pid, unsigned long long *sectors,
         *sector_size = message.u.image.sector_size;
         *info = message.u.image.info;
         *max_queues = message.u.image.max_queues;
+        *discard = message.u.image.discard;
+        *discard_granularity = message.u.image.discard_granularity;
         return 0;
     } else if (TAPDISK_MESSAGE_ERROR == message.type) {
        return -message.u.response.error;

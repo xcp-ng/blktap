@@ -141,6 +141,8 @@ struct td_disk_info {
 	td_sector_t                  size;
 	long                         sector_size;
 	uint32_t                     info;
+	bool                         discard;
+	long                         discard_granularity;
 };
 
 struct td_iovec {
