@@ -47,16 +47,17 @@ tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int devid, 
     tapdisk_message_t message;
     int i, err;
 
-	memset(&message, 0, sizeof(message));
+    memset(&message, 0, sizeof(message));
     message.type = TAPDISK_MESSAGE_XENBLKIF_CONNECT;
     message.cookie = minor;
 
     message.u.blkif.domid = domid;
     message.u.blkif.devid = devid;
     for (i = 0; i < 1 << order; i++)
-        message.u.blkif.gref[i] = grefs[i];
+        message.u.blkif.gref[0][i] = grefs[i];
+    message.u.blkif.nr_queues = 1;
     message.u.blkif.order = order;
-    message.u.blkif.port = port;
+    message.u.blkif.ports[0] = port;
     message.u.blkif.proto = proto;
     message.u.blkif.poll_duration = poll_duration;
     message.u.blkif.poll_idle_threshold = poll_idle_threshold;
