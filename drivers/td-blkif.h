@@ -222,8 +222,9 @@ struct td_xenblkif {
  */
 int
 tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
-        int order, evtchn_port_t port, int proto, int poll_duration,
-        int poll_idle_threshold, const char *pool, td_vbd_t * vbd);
+                         int order, evtchn_port_t port, bool persistent_grant,
+                         int proto, int poll_duration, int poll_idle_threshold,
+                         const char *pool, td_vbd_t * vbd);
 
 /**
  * Disconnects the tapdisk from the shared ring.
