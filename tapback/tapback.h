@@ -279,6 +279,11 @@ typedef struct vbd {
      */
     unsigned int info;
 
+    /**
+     * Max number of queues supported by the driver
+     */
+    unsigned int max_queues;
+
     int major;
 	int minor;
 
