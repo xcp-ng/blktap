@@ -146,21 +146,21 @@ scheduler_check_fd_events(scheduler_t *s, int nfds)
 		if ((event->mode & SCHEDULER_POLL_READ_FD) &&
 		    FD_ISSET(event->fd, &s->read_fds)) {
 			FD_CLR(event->fd, &s->read_fds);
-			event->pending |= SCHEDULER_POLL_READ_FD;
+			event->pending |= (event->masked) ? 0 : SCHEDULER_POLL_READ_FD;
 			--nfds;
 		}
 
 		if ((event->mode & SCHEDULER_POLL_WRITE_FD) &&
 		    FD_ISSET(event->fd, &s->write_fds)) {
 			FD_CLR(event->fd, &s->write_fds);
-			event->pending |= SCHEDULER_POLL_WRITE_FD;
+			event->pending |= (event->masked) ? 0 : SCHEDULER_POLL_WRITE_FD;
 			--nfds;
 		}
 
 		if ((event->mode & SCHEDULER_POLL_EXCEPT_FD) &&
 		    FD_ISSET(event->fd, &s->except_fds)) {
 			FD_CLR(event->fd, &s->except_fds);
-			event->pending |= SCHEDULER_POLL_EXCEPT_FD;
+			event->pending |= (event->masked) ? 0 : SCHEDULER_POLL_EXCEPT_FD;
 			--nfds;
 		}
 	}
