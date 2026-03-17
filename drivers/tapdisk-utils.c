@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <linux/fs.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -47,12 +48,25 @@
 
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 
-#define ASSERT(_p)										\
-	if (!(_p)) {											\
-		EPRINTF("%s:%d: FAILED ASSERTION: '%s'\n",			\
-			__FILE__, __LINE__, #_p);						\
-		td_panic();											\
+#define ASSERT(_p)						\
+	if (!(_p)) {						\
+		EPRINTF("%s:%d: FAILED ASSERTION: '%s'\n",	\
+			__FILE__, __LINE__, #_p);		\
+		td_panic();					\
 	}
+
+__noreturn void
+td_panic(void)
+{
+	tlog_precious(1);
+#if 0
+	fprintf(stderr, "!!!! abort !!!!\n");
+	fflush(stderr);
+	while(1);
+#endif
+	raise(SIGABRT);
+	_exit(-1); /* not reached */
+}
 
 static int
 tapdisk_syslog_facility_by_name(const char *name)
