@@ -389,11 +389,3 @@ td_debug(td_image_t *image)
 
 	tapdisk_driver_debug(driver);
 }
-
-__noreturn void
-td_panic(void)
-{
-	tlog_precious(1);
-	raise(SIGABRT);
-	_exit(-1); /* not reached */
-}
