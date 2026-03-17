@@ -680,7 +680,7 @@ tapdisk_xenblkif_parse_request(struct td_xenblkif * const blkif,
             iov++;
             iov->base = next;
             iov->secs = size;
-        } else /* The "else" is true if fist_sect is 0. */
+        } else /* The "else" is true if first_sect is 0. */
             iov->secs += size;
 
         last = iov->base + (iov->secs << SECTOR_SHIFT);
