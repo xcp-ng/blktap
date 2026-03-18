@@ -1172,6 +1172,19 @@ qcow2_debug(td_driver_t *driver)
 #endif
 }
 
+static int
+qcow2_pending(td_driver_t *driver)
+{
+	struct qcow2_state *s = (struct qcow2_state *)driver->data;
+	int n_pending;
+
+	pthread_mutex_lock(&s->lock);
+	n_pending = QCOW2_REQS - s->vreq_free_count;
+	pthread_mutex_unlock(&s->lock);
+
+	return n_pending;
+}
+
 struct tap_disk tapdisk_qcow = {
 	.disk_type          = "tapdisk_qcow2",
 	.flags              = TD_DRIVER_THREADED,
@@ -1183,6 +1196,7 @@ struct tap_disk tapdisk_qcow = {
 	.td_queue_write     = qcow2_queue_write,
 	.td_get_parent_id   = qcow2_get_parent_id,
 	.td_validate_parent = qcow2_validate_parent,
+	.td_pending         = qcow2_pending,
 	.td_commit          = qcow2_commit,
 	.td_query_commit_job = qcow2_query_commit_job,
 	.td_cancel_commit_job = qcow2_cancel_commit_job,
