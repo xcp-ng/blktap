@@ -2731,6 +2731,14 @@ vhd_debug(td_driver_t *driver)
 */
 }
 
+static int
+vhd_pending(td_driver_t *driver)
+{
+	struct vhd_state *s = (struct vhd_state *)driver->data;
+
+	return VHD_REQS_DATA - s->vreq_free_count;
+}
+
 struct tap_disk tapdisk_vhd = {
 	.disk_type          = "tapdisk_vhd",
 	.flags              = 0,
@@ -2743,5 +2751,6 @@ struct tap_disk tapdisk_vhd = {
 	.td_queue_write     = vhd_queue_write,
 	.td_get_parent_id   = vhd_get_parent_id,
 	.td_validate_parent = vhd_validate_parent,
+	.td_pending         = vhd_pending,
 	.td_debug           = vhd_debug,
 };
