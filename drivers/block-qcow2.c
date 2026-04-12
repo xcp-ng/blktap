@@ -951,12 +951,14 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 	}
 	if (top_bs == NULL) {
 		DPRINTF("qcow2_commit: top '%s' doesn't exist\n", req->top);
+		err = -EINVAL;
 		goto signal_commit;
 	}
 	top_node = top_bs->node_name;
 	base_bs = bdrv_backing_chain_next(top_bs);
 	if (base_bs == NULL) {
 		DPRINTF("qcow2_commit: no base to commit in\n");
+		err = -EINVAL;
 		goto signal_commit;
 	}
 	base_node = base_bs->node_name;
@@ -1035,6 +1037,7 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 	if (!bjob) {
 		job_unlock();
 		DPRINTF("Qcow2: no job running.\n");
+		err = -ENOENT;
 		goto signal;
 	}
 

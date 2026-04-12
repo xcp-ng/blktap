@@ -620,7 +620,7 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 
 		vbd->efd = eventfd(0, 0);
 		if (vbd->efd == -1) {
-			err = errno;
+			err = -errno;
 			ERROR("Failed to create eventfd: %s\n", strerror(-err));
 			goto fail;
 		}
@@ -1124,7 +1124,7 @@ tapdisk_vbd_commit(td_vbd_t *vbd, const char *name)
 	int err;
 
 	if (log) {
-		INFO("commit %s\n", name);
+		INFO("commit %s\n", name ? name : "(null)");
 	}
 
 	err = td_commit(tapdisk_vbd_first_image(vbd), name);

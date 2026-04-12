@@ -426,45 +426,49 @@ tapdisk_server_signal_handler(event_id_t id, char mode __attribute__((unused)), 
 	struct td_xenblkif *blkif;
 	static int xfsz_error_sent = 0;
 
-	size = read(server.sigfd, &fdsi, sizeof(fdsi));
-	if (size != sizeof(fdsi)) {
-		ERR(EFBIG, "failed to read signals");
-		return;
-	}
+	while ((size = read(server.sigfd, &fdsi, sizeof(fdsi))) > 0) {
+		if (size != sizeof(fdsi)) {
+			ERR(EFBIG, "failed to read signals");
+			continue;
+		}
 
-	signal = fdsi.ssi_signo;
+		signal = fdsi.ssi_signo;
 
-	switch (signal) {
-	case SIGBUS:
-		tapdisk_server_for_each_vbd(vbd, tmp)
-			tapdisk_vbd_close(vbd);
-		break;
-
-	case SIGXFSZ:
-		ERR(EFBIG, "received SIGXFSZ");
-		tapdisk_server_stop_vbds();
-		if (xfsz_error_sent)
+		switch (signal) {
+		case SIGBUS:
+			tapdisk_server_for_each_vbd(vbd, tmp)
+				tapdisk_vbd_close(vbd);
 			break;
 
-		xfsz_error_sent = 1;
-		break;
+		case SIGXFSZ:
+			ERR(EFBIG, "received SIGXFSZ");
+			tapdisk_server_stop_vbds();
+			if (xfsz_error_sent)
+				break;
 
-	case SIGUSR1:
-		DBG(TLOG_INFO, "debugging on signal %d\n", signal);
-		tapdisk_server_debug();
-		break;
+			xfsz_error_sent = 1;
+			break;
 
-	case SIGUSR2:
-		DBG(TLOG_INFO, "triggering polling on signal %d\n", signal);
-		tapdisk_server_for_each_vbd(vbd, tmp)
-			list_for_each_entry(blkif, &vbd->rings, entry)
-				tapdisk_start_polling(blkif);
-		break;
+		case SIGUSR1:
+			DBG(TLOG_INFO, "debugging on signal %d\n", signal);
+			tapdisk_server_debug();
+			break;
 
-	case SIGHUP:
-		tapdisk_server_event_set_timeout(server.tlog_reopen_evid, TV_ZERO);
-		break;
+		case SIGUSR2:
+			DBG(TLOG_INFO, "triggering polling on signal %d\n", signal);
+			tapdisk_server_for_each_vbd(vbd, tmp)
+				list_for_each_entry(blkif, &vbd->rings, entry)
+					tapdisk_start_polling(blkif);
+			break;
+
+		case SIGHUP:
+			tapdisk_server_event_set_timeout(server.tlog_reopen_evid, TV_ZERO);
+			break;
+		}
 	}
+
+	if (size < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+		ERR(errno, "failed to read signals: %s", strerror(errno));
 }
 
 
@@ -847,18 +851,18 @@ tapdisk_server_run()
 	sigaddset(&set, SIGUSR2);
 	sigaddset(&set, SIGHUP);
 	sigaddset(&set, SIGXFSZ);
-	server.sigfd = signalfd(-1, &set, 0);
+	server.sigfd = signalfd(-1, &set, SFD_NONBLOCK);
 	if (server.sigfd == -1) {
 		err = errno;
 		EPRINTF("failed to create a new signalfd: %s\n",
-			strerror(-err));
+			strerror(err));
 		goto out;
 	}
 
 	if (sigprocmask(SIG_BLOCK, &set, NULL) == -1) {
 		err = errno;
 		EPRINTF("failed to block signals we'd like to handle with signalfd: %s\n",
-			strerror(-err));
+			strerror(err));
 		goto out;
 	}
 
