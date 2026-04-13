@@ -954,7 +954,7 @@ tapdisk_xenblkif_reqs_init(struct td_xenblkif *td_blkif)
     }
 
     td_blkif->reqs_free =
-        malloc(td_blkif->ring_size * sizeof(struct blkif_request_t *));
+        malloc(td_blkif->ring_size * sizeof(blkif_request_t *));
     if (!td_blkif->reqs_free) {
         err = -errno;
         goto fail;
