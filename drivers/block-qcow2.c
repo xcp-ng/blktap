@@ -63,6 +63,7 @@
 #include "qapi/qmp/qdict.h"
 #include "qapi/qapi-commands-block-core.h"
 #include "qapi/qapi-commands-job.h"
+#include "qemu/defer-call.h"
 
 #include "tapdisk.h"
 #include "tapdisk-driver.h"
@@ -158,6 +159,7 @@ struct qcow2_state {
 	struct qcow2_request      *vreq_free[QCOW2_REQS];
 	struct qcow2_request      vreq_list[QCOW2_REQS];
 	QSIMPLEQ_HEAD(inflight_head, qcow2_request) inflight;
+	int                       requests_inflight;
 
 	QEMUBH                    *bh;
 	AioContext                *ctx;
@@ -272,9 +274,13 @@ qcow2_free(struct qcow2_state *s)
 	qemu_deinit_cpu_loop();
 }
 
+#define IO_PLUG_THRESHOLD 1
+
 static void qcow2_handle_requests(struct qcow2_state *s)
 {
 	struct qcow2_request *req;
+	int inflight_atstart;
+	int batched = 0;
 
 	pthread_mutex_lock(&s->lock);
 	if (s->handling_requests) {
@@ -284,10 +290,20 @@ static void qcow2_handle_requests(struct qcow2_state *s)
 		return;
 	}
 	s->handling_requests = true;
+
+	inflight_atstart = s->requests_inflight;
+	if (inflight_atstart > IO_PLUG_THRESHOLD) {
+		defer_call_begin();
+	}
+
 	while ((req = QSIMPLEQ_FIRST(&s->inflight))) {
 		QSIMPLEQ_REMOVE_HEAD(&s->inflight, list);
 		pthread_mutex_unlock(&s->lock);
 
+		if (inflight_atstart > IO_PLUG_THRESHOLD &&
+		    batched >= inflight_atstart) {
+			defer_call_end();
+		}
 		switch (req->op) {
 			case QCOW2_OP_READ:
 				do_aio_read(s, req);
@@ -305,10 +321,22 @@ static void qcow2_handle_requests(struct qcow2_state *s)
 				do_cancel_commit_job(s, req);
 				break;
 		}
+		if (inflight_atstart > IO_PLUG_THRESHOLD) {
+			if (batched >= inflight_atstart) {
+				defer_call_begin();
+				batched = 0;
+			} else {
+				batched++;
+			}
+		}
 		pthread_mutex_lock(&s->lock);
 	}
 	s->handling_requests = false;
 	pthread_mutex_unlock(&s->lock);
+
+	if (inflight_atstart > IO_PLUG_THRESHOLD) {
+		defer_call_end();
+	}
 }
 
 static void block_bh(void *opaque)
@@ -717,12 +745,12 @@ alloc_qcow2_request(struct qcow2_state *s)
 	pthread_mutex_lock(&s->lock);
 	if (s->vreq_free_count > 0) {
 		req = s->vreq_free[--s->vreq_free_count];
+		s->requests_inflight++;
 		pthread_mutex_unlock(&s->lock);
 		ASSERT(req->treq.secs == 0);
 		init_qcow2_request(s, req);
 		return req;
 	}
-
 	pthread_mutex_unlock(&s->lock);
 	return NULL;
 }
@@ -735,6 +763,7 @@ free_qcow2_request(struct qcow2_state *s, struct qcow2_request *req)
 	qemu_iovec_reset(&req->qiov);
 
 	pthread_mutex_lock(&s->lock);
+	s->requests_inflight--;
 	s->vreq_free[s->vreq_free_count++] = req;
 	pthread_mutex_unlock(&s->lock);
 }
