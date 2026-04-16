@@ -55,6 +55,7 @@
 #include "qemu/osdep.h"
 #include "qcow2.h"
 #include "qemu/main-loop.h"
+#include "qemu/module.h"
 #include "hw/block/block.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
@@ -208,9 +209,12 @@ static inline void do_query_commit_job(struct qcow2_state *s, struct qcow2_reque
 static inline void do_cancel_commit_job(struct qcow2_state *s, struct qcow2_request *req);
 static int qcow2_cancel_commit_job(td_driver_t *driver, bool wait);
 
+
+/* TODO: must be called once, this can prevent have multiple VBD */
 static int
 qcow2_initialize(struct qcow2_state *s, Error **perr)
 {
+        static bool init_once = true;
 	int err;
 
 #if DEBUGGING != 0
@@ -222,10 +226,33 @@ qcow2_initialize(struct qcow2_state *s, Error **perr)
 	s->write_lat.min_val = ULONG_MAX;
 #endif
 
+	/*
+	 * The BQL of this thread and the main loop, undone by qcow2_free() when
+	 * the image is closed: set them up at each open, as a pause and resume
+	 * reopens the image in a new thread.
+	 */
 	qemu_init_cpu_loop();
 	bql_lock();
 
-	bdrv_init();
+	/* Type and driver registrations (under the BQL), which can't be undone */
+	if (init_once) {
+		init_once = false;
+
+		qemu_thread_naming(true);
+
+		module_call_init(MODULE_INIT_QOM);
+		bdrv_init();
+
+#ifdef STATIC__
+		main_loop_register_types();
+		iothread_register_types();
+		container_register_types();
+		qio_channel_register_types()
+			qio_channel_file_register_types();
+
+		//rcu_init();  // can't be initialized in
+#endif
+	}
 
 	err = qemu_init_main_loop(perr);
 	if (err != 0) {
