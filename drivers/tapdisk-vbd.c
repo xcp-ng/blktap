@@ -573,10 +573,12 @@ fail:
 }
 
 int 
-tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_devnum)
+tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_devnum, td_err *error)
 {
 	char *tmp = vbd->name;
 	int err;
+
+	td_err_init_errno(error);
 
 	if (!list_empty(&vbd->images)) {
 		err = -EBUSY;
@@ -596,7 +598,7 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 		}
 	}
 
-	err = tapdisk_image_open_chain(vbd->name, flags, prt_devnum, &vbd->encryption, &vbd->images);
+	err = tapdisk_image_open_chain(vbd->name, flags, prt_devnum, &vbd->encryption, &vbd->images, error);
 	if (err)
 		goto fail;
 
@@ -629,7 +631,7 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 			if (vbd->nbd_mirror_failed != 1)
 				goto fail;
 			INFO("Ignoring failed NBD secondary attach\n");
-			err = 0;
+			td_err_set_success(error);
 		}
 	}
 
@@ -649,7 +651,7 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 	if (tmp != vbd->name)
 		free(tmp);
 
-	return err;
+	return td_err_get_errno(error);
 
 fail:
 	if (vbd->name != tmp) {
@@ -662,7 +664,7 @@ fail:
 
 	vbd->flags = 0;
 
-	return err;
+	return td_err_set_errno(error, err);
 }
 
 void
@@ -977,20 +979,22 @@ tapdisk_vbd_pause(td_vbd_t *vbd)
 }
 
 int
-tapdisk_vbd_resume(td_vbd_t *vbd, const char *name)
+tapdisk_vbd_resume(td_vbd_t *vbd, const char *name, td_err *error)
 {
-	int i, err;
+	int i, err = 0;
     struct td_xenblkif *blkif;
+
+	td_err_init_errno(error);
 
 	DBG(TLOG_DBG, "resume requested\n");
 
 	if (!td_flag_test(vbd->state, TD_VBD_PAUSED)) {
 		EPRINTF("resume request for unpaused vbd %s\n", vbd->name);
-		return -EINVAL;
+		return td_err_set_errno(error, -EINVAL);
 	}
 
 	for (i = 0; i < TD_VBD_EIO_RETRIES; i++) {
-		err = tapdisk_vbd_open_vdi(vbd, name, vbd->flags | TD_OPEN_STRICT, -1);
+		err = tapdisk_vbd_open_vdi(vbd, name, vbd->flags | TD_OPEN_STRICT, -1, error);
 		if (!err)
 			break;
 
@@ -1017,7 +1021,7 @@ resume_failed:
 	if (err) {
 		td_flag_set(vbd->state, TD_VBD_RESUME_FAILED);
 		tapdisk_vbd_close_vdi(vbd);
-		return err;
+		return td_err_set_errno(error, err);
 	}
 	td_flag_clear(vbd->state, TD_VBD_RESUME_FAILED);
 
@@ -1039,7 +1043,7 @@ resume_failed:
 
 	DBG(TLOG_DBG, "state checked\n");
 
-	return 0;
+	return td_err_set_success(error);
 }
 
 static int

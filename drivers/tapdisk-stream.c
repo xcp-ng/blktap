@@ -339,7 +339,8 @@ tapdisk_stream_open_image(struct tapdisk_stream *s, const char *name)
 		goto out;
 	}
 
-	err = tapdisk_vbd_open_vdi(s->vbd, name, TD_OPEN_RDONLY, -1);
+	td_err error = td_err_generate_errno_error(0);
+	err = tapdisk_vbd_open_vdi(s->vbd, name, TD_OPEN_RDONLY, -1, &error);
 	if (err)
 		goto out;
 
