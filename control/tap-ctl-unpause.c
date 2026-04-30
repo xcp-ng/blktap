@@ -44,7 +44,7 @@
 
 int
 tap_ctl_unpause(const int id, const int minor, const char *params, int flags,
-		char *secondary, const char *logpath)
+		char *secondary, const char *logpath, td_err *error)
 {
 	int err;
 	tapdisk_message_t message;
@@ -53,6 +53,8 @@ tap_ctl_unpause(const int id, const int minor, const char *params, int flags,
 	message.type = TAPDISK_MESSAGE_RESUME;
 	message.cookie = minor;
 	message.u.params.flags = flags;
+
+	td_err_init_errno(error);
 
 	if (params)
 		safe_strncpy(message.u.params.path, params,
@@ -63,7 +65,7 @@ tap_ctl_unpause(const int id, const int minor, const char *params, int flags,
 			       secondary);
 		if (err >= sizeof(message.u.params.secondary)) {
 			EPRINTF("secondary image name too long\n");
-			return -ENAMETOOLONG;
+			return td_err_set_errno(error, -ENAMETOOLONG);
 		}
 	}
 	if (logpath) {
@@ -73,8 +75,10 @@ tap_ctl_unpause(const int id, const int minor, const char *params, int flags,
 		err = tap_ctl_connect_send_and_receive(id, &message, NULL);
 	}
 
+	if (message.u.response.message[0])
+		td_err_set_reason(error, message.u.response.message);
 	if (err)
-		return err;
+		return td_err_set_errno(error, err);
 
 	if (message.type == TAPDISK_MESSAGE_RESUME_RSP
 			|| message.type == TAPDISK_MESSAGE_ERROR)
@@ -87,6 +91,8 @@ tap_ctl_unpause(const int id, const int minor, const char *params, int flags,
 
 	if (err)
 		EPRINTF("unpause failed: %s\n", strerror(-err));
+	else
+		return td_err_set_success(error);
 
-	return err;
+	return td_err_set_errno(error, err);
 }

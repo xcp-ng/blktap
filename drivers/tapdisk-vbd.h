@@ -209,7 +209,7 @@ int tapdisk_vbd_close(td_vbd_t *);
  * @returns 0 on success
  */
 int tapdisk_vbd_open_vdi(td_vbd_t * vbd, const char *params, td_flag_t flags,
-        int prt_devnum);
+        int prt_devnum, td_err *error);
 void tapdisk_vbd_close_vdi(td_vbd_t *);
 
 int tapdisk_vbd_attach(td_vbd_t *, const char *, int);
@@ -226,7 +226,7 @@ int tapdisk_vbd_issue_requests(td_vbd_t *);
 int tapdisk_vbd_kill_queue(td_vbd_t *);
 int tapdisk_vbd_pause(td_vbd_t *);
 void tapdisk_vbd_squash_pause_logging(bool squash);
-int tapdisk_vbd_resume(td_vbd_t *, const char *);
+int tapdisk_vbd_resume(td_vbd_t *, const char *, td_err *);
 void tapdisk_vbd_kick(td_vbd_t *, bool);
 void tapdisk_vbd_check_state(td_vbd_t *);
 void tapdisk_vbd_free(td_vbd_t *);
