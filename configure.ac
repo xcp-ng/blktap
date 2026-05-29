@@ -32,7 +32,6 @@ AC_CHECK_LIB([uuid], [main],
 PKG_PROG_PKG_CONFIG
 PKG_CHECK_MODULES([GLIB], [glib-2.0])
 PKG_CHECK_MODULES([ZLIB], [zlib])
-PKG_CHECK_MODULES([GNUTLS], [gnutls])
 PKG_CHECK_MODULES([LIBZSTD], [libzstd])
 
 AS_IF([test x$with_libiconv != xno],

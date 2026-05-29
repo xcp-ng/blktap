@@ -2594,7 +2594,7 @@ int bdrv_common_block_status_above(BlockDriverState *bs, BlockDriverState *base,
 /*
  * Wrappers for nbd_co_do_establish_connection
  */
-
+#if 0
 typedef struct NbdDoEstablishConnection {
     BdrvPollCo poll_state;
     int ret;
@@ -2636,3 +2636,4 @@ int nbd_do_establish_connection(BlockDriverState *bs, bool blocking, Error **err
         return s.ret;
     }
 }
+#endif

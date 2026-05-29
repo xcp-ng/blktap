@@ -944,6 +944,7 @@ void hbitmap_merge(const HBitmap *a, const HBitmap *b, HBitmap *result)
     result->count = hb_count_between(result, 0, result->size - 1);
 }
 
+#if 0
 char *hbitmap_sha256(const HBitmap *bitmap, Error **errp)
 {
     size_t size = bitmap->sizes[HBITMAP_LEVELS - 1] * sizeof(unsigned long);
@@ -953,3 +954,4 @@ char *hbitmap_sha256(const HBitmap *bitmap, Error **errp)
 
     return hash;
 }
+#endif
