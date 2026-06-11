@@ -2149,19 +2149,18 @@ tapdisk_vbd_kick(td_vbd_queue_t *queue, bool scheduler_kick)
 		prev->cb(prev, prev->error, prev->token, 1);
 		queue->returned++;
 	}
+	pthread_mutex_unlock(&queue->mutex);
 
 	if (scheduler_kick && td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED)) {
 		static uint64_t token = 1;
 
 		if (queue->efd < 0) {
-		    pthread_mutex_unlock(&queue->mutex);
 		    return;
 		}
 
 		s = write(queue->efd, &token, sizeof(uint64_t));
 		ASSERT(s == sizeof(uint64_t));
 	}
-	pthread_mutex_unlock(&queue->mutex);
 }
 
 int
