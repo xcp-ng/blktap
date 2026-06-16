@@ -368,13 +368,13 @@ tapdisk_server_check_progress(td_queue_id_t qid)
 static void
 tapdisk_server_submit_tiocbs(td_queue_id_t qid)
 {
-	tracepoint(tapdisk, aio_submit, qid, 0, 0);
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_BEGIN, 0);
 	server.rw_backend->submit_all(server.rw_queue[qid]);
-	tracepoint(tapdisk, aio_submit, qid, 1, 0);
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_END, 0);
 
-	tracepoint(tapdisk, aio_submit, qid, 0, 1);
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_BEGIN, 1);
 	server.ro_backend->submit_all(server.ro_queue[qid]);
-	tracepoint(tapdisk, aio_submit, qid, 1, 1);
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_END, 1);
 }
 
 static void

@@ -11,6 +11,18 @@
 
 #include "config.h"
 
+/*
+ * Phase markers for the begin/end "phase" field of bracketing tracepoints
+ * (sched_*, aio_submit, guest_copy, grant_copy, evtchn_notify, ...).
+ *
+ * They use ASCII magic values rather than 0/1 so a raw trace dump reads
+ * unambiguously.
+ */
+#ifndef TP_PHASE_BEGIN
+#define TP_PHASE_BEGIN 0x4245474e /* "BEGN" */
+#define TP_PHASE_END   0x454e4421 /* "END!" */
+#endif
+
 #ifdef HAVE_LTTNG
 #undef TRACEPOINT_PROVIDER
 #define TRACEPOINT_PROVIDER tapdisk
@@ -124,7 +136,7 @@ TRACEPOINT_EVENT(
 
 /*
  * Emitted around the event channel notification to the guest.
- * phase: 0 = begin (before xenevtchn_notify), 1 = end (after).
+ * phase: TP_PHASE_BEGIN (before xenevtchn_notify), TP_PHASE_END (after).
  */
 TRACEPOINT_EVENT(
 	TAPDISK_TP_PROVIDER,
@@ -210,7 +222,7 @@ TRACEPOINT_EVENT(
 
 /*
  * Emitted around the full guest_copy2() call (grant copy + segment handling).
- * phase: 0 = begin, 1 = end.
+ * phase: TP_PHASE_BEGIN, TP_PHASE_END.
  * direction: 0 = from guest (write path), 1 = to guest (read completion).
  */
 TRACEPOINT_EVENT(
@@ -232,7 +244,7 @@ TRACEPOINT_EVENT(
 
 /*
  * Emitted around the grant-copy ioctl (Xen hypercall).
- * phase: 0 = begin (before ioctl), 1 = end (after ioctl).
+ * phase: TP_PHASE_BEGIN (before ioctl), TP_PHASE_END (after ioctl).
  * direction: 0 = from guest (write path), 1 = to guest (read completion).
  */
 TRACEPOINT_EVENT(
@@ -256,7 +268,7 @@ TRACEPOINT_EVENT(
 
 /*
  * Emitted around backend submit_all calls (wraps io_submit / lio_listio).
- * phase: 0 = begin, 1 = end.
+ * phase: TP_PHASE_BEGIN, TP_PHASE_END.
  * rw: 0 = read-write backend, 1 = read-only backend.
  */
 TRACEPOINT_EVENT(

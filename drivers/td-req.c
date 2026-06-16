@@ -312,9 +312,9 @@ xenio_blkif_put_response(struct td_blkif_queue * const queue,
             struct td_xenblkif* const blkif = queue->blkif;
             uint16_t __unused qid = tapdisk_xenblkif_queue_id(queue);
 
-            tracepoint(tapdisk, evtchn_notify, qid, 0);
+            tracepoint(tapdisk, evtchn_notify, qid, TP_PHASE_BEGIN);
             int err = xenevtchn_notify(queue->ctx->xce_handle, queue->ctx->port);
-            tracepoint(tapdisk, evtchn_notify, qid, 1);
+            tracepoint(tapdisk, evtchn_notify, qid, TP_PHASE_END);
 
             if (err < 0) {
                 err = -errno;
@@ -382,7 +382,7 @@ guest_copy2(struct td_xenblkif * const blkif, const struct td_xenio_shared_ctx* 
 
     int dir __unused = blkif_rq_wr(&req->msg) ? 0 : 1;
     tracepoint(tapdisk, guest_copy,
-               req->msg.id, 0, dir, req->msg.nr_segments);
+               req->msg.id, TP_PHASE_BEGIN, dir, req->msg.nr_segments);
 
     for (i = 0; i < req->msg.nr_segments; i++) {
         struct blkif_request_segment *blkif_seg = &req->msg.seg[i];
@@ -415,12 +415,12 @@ guest_copy2(struct td_xenblkif * const blkif, const struct td_xenio_shared_ctx* 
     gcopy.segments = req->gcopy_segs;
 
     tracepoint(tapdisk, grant_copy,
-	       req->msg.id, 0, dir, req->msg.nr_segments);
+	       req->msg.id, TP_PHASE_BEGIN, dir, req->msg.nr_segments);
 
     err = -ioctl(ctx->gntdev_fd, IOCTL_GNTDEV_GRANT_COPY, &gcopy);
 
     tracepoint(tapdisk, grant_copy,
-	       req->msg.id, 1, dir, req->msg.nr_segments);
+	       req->msg.id, TP_PHASE_END, dir, req->msg.nr_segments);
 
     if (err) {
         err = -errno;
@@ -447,7 +447,7 @@ guest_copy2(struct td_xenblkif * const blkif, const struct td_xenio_shared_ctx* 
 
 out:
     tracepoint(tapdisk, guest_copy,
-               req->msg.id, 1, dir, req->msg.nr_segments);
+               req->msg.id, TP_PHASE_END, dir, req->msg.nr_segments);
     return err;
 }
 
