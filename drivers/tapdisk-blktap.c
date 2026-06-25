@@ -404,7 +404,7 @@ tapdisk_blktap_get_requests(td_blktap_t *tap)
 			goto fail_ring;
 		}
 
-		err = tapdisk_vbd_queue_request(tap->vbd, &req->vreq, (rc+1 == rp));
+		err = tapdisk_vbd_queue_request(tap->vbd, &req->vreq, (td_queue_id_t)0, (rc+1 == rp));
 		if (err)
 			tapdisk_blktap_complete_request(tap, req, err, 1);
 	}

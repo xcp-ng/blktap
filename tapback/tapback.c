@@ -498,6 +498,7 @@ usage(FILE * const stream, const char * const prog)
 
     fprintf(stream,
             "usage: %s\n"
+            "\t[-x|--domid]\n"
             "\t[-d|--debug]\n"
             "\t[-h|--help]\n"
             "\t[-v|--verbose]\n"

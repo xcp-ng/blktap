@@ -204,6 +204,8 @@ llpcache_requeue_treq(td_llpcache_t *s, td_llpcache_req_t *req, int target)
 {
 	struct llpcache_vreq *lvr;
 	td_vbd_request_t *vreq;
+	td_vbd_t *vbd;
+	td_queue_id_t qid;
 	int err;
 
 	lvr           = &req->lvr[target];
@@ -217,7 +219,11 @@ llpcache_requeue_treq(td_llpcache_t *s, td_llpcache_req_t *req, int target)
 	vreq->cb      = __llpcache_write_cb;
 	vreq->token   = s;
 
-	err = tapdisk_vbd_queue_request(req->treq.vreq->vbd, vreq, true);  // TODO: suboptimal final argument
+	vbd = req->treq.vreq->vqueue->vbd;
+	qid = req->treq.vreq->vqueue - vbd->queues;
+
+	// FIXME: maybe define another convenient API
+	err = tapdisk_vbd_queue_request(vbd, vreq, qid, true);  // TODO: suboptimal final argument
 	if (err)
 		goto fail;
 

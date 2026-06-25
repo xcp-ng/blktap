@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
+#include "debug.h"
 #include "list.h"
 #include "scheduler.h"
 #include "tapdisk.h"
@@ -278,11 +279,12 @@ tapdisk_stream_queue_request(td_stream_t *s, td_stream_req_t *req)
 	vreq->op            = TD_OP_READ;
 	vreq->token         = s;
 	vreq->cb            = __tapdisk_stream_request_cb;
+	// XXX: do not overwrite vreq->vqueue it is constant over time (add an ASSERT ?)
 
 	s->count  -= secs;
 	s->sec_in += secs;
 
-	err = tapdisk_vbd_queue_request(s->vbd, vreq, true);
+	err = tapdisk_vbd_queue_request(s->vbd, vreq, (td_queue_id_t)0, true);
 	if (err)
 		tapdisk_stream_complete_request(s, req, err, 1);
 

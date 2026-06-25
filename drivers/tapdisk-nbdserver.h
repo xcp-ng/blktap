@@ -71,7 +71,7 @@ struct nbd_reply {
 #define TAPDISK_NBDSERVER_NEW_SOCK_PATH BLKTAP2_CONTROL_DIR"/nbd"
 
 struct td_nbdserver {
-	td_vbd_t               *vbd;
+	td_vbd_queue_t         *vqueue;
 	td_disk_info_t          info;
 
 	/**

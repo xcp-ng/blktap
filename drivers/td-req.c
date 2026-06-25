@@ -723,7 +723,7 @@ tapdisk_xenblkif_parse_request_locked(struct td_blkif_queue* const queue,
 			blkif->stats.xenvbd->st_rd_sect += nr_sect;
 		if (likely(blkif->vbd_stats.stats))
 			blkif->vbd_stats.stats->read_sectors += nr_sect;
-    } 
+    }
 
     vreq->token = queue;
     vreq->cb = __tapdisk_xenblkif_request_cb;
@@ -866,7 +866,10 @@ tapdisk_xenblkif_queue_request(struct td_blkif_queue * const queue,
     }
 
 	if (likely(queue_request)) {
-		err = tapdisk_vbd_queue_request(queue->blkif->vbd, &req->vreq, final);
+		td_queue_id_t qid = tapdisk_xenblkif_queue_id(queue);
+
+		// XXX: be careful to matching of queue IDs between blkif and VBD
+		err = tapdisk_vbd_queue_request(queue->blkif->vbd, &req->vreq, qid, final);
 		if (unlikely(err)) {
 			/* TODO log error */
 			queue->blkif->stats.errors.vbd++;

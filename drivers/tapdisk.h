@@ -125,6 +125,7 @@ typedef struct td_image_handle       td_image_t;
 typedef struct td_sector_count       td_sector_count_t;
 typedef struct td_vbd_request        td_vbd_request_t;
 typedef struct td_vbd_handle         td_vbd_t;
+typedef struct td_vbd_queue          td_vbd_queue_t;
 typedef struct td_query              td_query_t;
 
 /* 
@@ -173,7 +174,7 @@ struct td_vbd_request {
 	/* When "reading-through" the local cache, don't write back to the source */
 	bool                        skip_mirror;
 
-	td_vbd_t                   *vbd;
+	td_vbd_queue_t             *vqueue;
 	struct list_head            next;
 	struct list_head           *list_head;
 };

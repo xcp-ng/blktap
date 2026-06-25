@@ -65,9 +65,11 @@ typedef struct tapdisk_server {
 	char                        *name;
 	char                        *ident;
 	int                          facility;
+#if 0
 	event_id_t                   wake_event;
 	int                          wake_event_fd;
 	uint64_t                     wake_event_count;
+#endif
 
 	/* IO threads states */
 	struct {
@@ -299,6 +301,7 @@ tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int seconds)
 	scheduler_set_max_timeout(&server.io_threads[qid].scheduler, TV_SECS(seconds));
 }
 
+#if 0   // TODO: to be removed
 void
 tapdisk_server_scheduler_wake(void)
 {
@@ -318,33 +321,24 @@ tapdisk_server_scheduler_wake_handler(event_id_t id, char mode __attribute__((un
 	n = read(server.wake_event_fd, &cnt, sizeof(cnt));
 	ASSERT(n == 8);
 }
-static void
-tapdisk_server_assert_locks(void)
-{
-
-}
+#endif
 
 static void
-tapdisk_server_set_retry_timeout(void)
+tapdisk_server_set_retry_timeout(td_queue_id_t qid)
 {
 	td_vbd_t *vbd, *tmp;
 
-	tapdisk_server_for_each_vbd(vbd, tmp)
-		if (tapdisk_vbd_retry_needed(vbd)) {
-			tapdisk_server_set_max_timeout(TD_VBD_RETRY_INTERVAL);
+	/* FIXME: VBD list not locked */
+	tapdisk_server_for_each_vbd(vbd, tmp) {
+		if (tapdisk_vbd_retry_needed(&vbd->queues[qid])) {
+			tapdisk_server_set_io_max_timeout(qid, TD_VBD_RETRY_INTERVAL);
 			return;
 		}
+	}
 }
 
 static void
-tapdisk_server_set_io_retry_timeout(int qid)
-{
-	// Do nothing because, retry is related to new failed and failed
-	// list which are handled in main thread
-}
-
-static void
-tapdisk_server_check_progress(void)
+tapdisk_server_check_progress(td_queue_id_t qid)
 {
 	struct timeval now;
 	td_vbd_t *vbd, *tmp;
@@ -352,7 +346,7 @@ tapdisk_server_check_progress(void)
 	gettimeofday(&now, NULL);
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_check_progress(vbd);
+		tapdisk_vbd_check_progress(&vbd->queues[qid]);
 }
 
 static void
@@ -363,21 +357,21 @@ tapdisk_server_submit_tiocbs(void)
 }
 
 static void
-tapdisk_server_kick_responses(void)
+tapdisk_server_kick_responses(td_queue_id_t qid)
 {
 	td_vbd_t *vbd, *tmp;
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_kick(vbd, false);
+		tapdisk_vbd_kick(&vbd->queues[qid], false);
 }
 
 static void
-tapdisk_server_check_vbds(void)
+tapdisk_server_check_vbds(td_queue_id_t qid)
 {
 	td_vbd_t *vbd, *tmp;
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_check_state(vbd);
+		tapdisk_vbd_check_state(&vbd->queues[qid]);
 }
 
 /**
@@ -385,13 +379,17 @@ tapdisk_server_check_vbds(void)
  * which have been issued.
  */
 static int
-tapdisk_server_recheck_vbds(void)
+tapdisk_server_recheck_vbds(td_queue_id_t qid)
 {
 	td_vbd_t *vbd, *tmp;
 	int rv = 0;
 
-	tapdisk_server_for_each_vbd(vbd, tmp)
-		rv += tapdisk_vbd_recheck_state(vbd);
+	// TODO: change that, ok for one VBD, but maybe we should have
+	//       1:1 thread per queue (for the moment we are sharing a
+	//       thread between multiple VBD)
+	tapdisk_server_for_each_vbd(vbd, tmp) {
+		rv += tapdisk_vbd_recheck_state(&vbd->queues[qid]);
+	}
 
 	return rv;
 }
@@ -490,12 +488,20 @@ tapdisk_io_iterate(td_queue_id_t qid)
 {
 	int ret;
 
-	tapdisk_server_set_io_retry_timeout(qid);
+	tapdisk_server_set_retry_timeout(qid);
+	tapdisk_server_check_progress(qid);
 
 	ret = scheduler_wait_for_events(&server.io_threads[qid].scheduler);
 	if (ret < 0)
 		DBG(TLOG_WARN, "server wait returned %s\n", strerror(-ret));
 
+	tapdisk_server_check_vbds(qid);
+	do {
+		tapdisk_server_submit_tiocbs();
+		tapdisk_server_kick_responses(qid);
+
+		ret = tapdisk_server_recheck_vbds(qid);
+	} while (ret); /* repeat until there are no new requests to issue */
 }
 
 static void*
@@ -516,21 +522,9 @@ tapdisk_server_iterate(void)
 {
 	int ret;
 
-	tapdisk_server_assert_locks();
-	tapdisk_server_set_retry_timeout();
-	tapdisk_server_check_progress();
-
 	ret = scheduler_wait_for_events(&server.scheduler);
 	if (ret < 0)
 		DBG(TLOG_WARN, "server wait returned %s\n", strerror(-ret));
-
-	tapdisk_server_check_vbds();
-	do {
-		tapdisk_server_submit_tiocbs();
-		tapdisk_server_kick_responses();
-
-		ret = tapdisk_server_recheck_vbds();
-	} while (ret); /* repeat until there are no new requests to issue */
 }
 
 static void
@@ -878,11 +872,6 @@ tapdisk_server_initialize_cpumond_client(void)
 	return 0;
 }
 
-static void
-tapdisk_server_io_dummy(event_id_t id, char mode, void *private)
-{
-}
-
 int
 tapdisk_server_init(void)
 {
@@ -899,8 +888,10 @@ tapdisk_server_init(void)
 
 	server.tlog_reopen_evid = -1;
 	server.signal_handler_evid = -1;
+#if 0  // TODO: to be removed
 	server.wake_event = -1;
 	server.wake_event_fd = -1;
+#endif
 
 	scheduler_initialize(&server.scheduler);
 
@@ -956,6 +947,7 @@ tapdisk_server_complete(void)
 		server.io_threads[qid].eventfd = fd;
 		server.io_threads[qid].eventfd_count = 0;
 
+		/* FIXME: register_io_event ? */
 		int event = scheduler_register_event(&server.io_threads[qid].scheduler,
 						     SCHEDULER_POLL_READ_FD,
 						     server.io_threads[qid].eventfd,
@@ -975,13 +967,9 @@ tapdisk_server_complete(void)
 		snprintf(server.io_threads[qid].name,
 			 sizeof(server.io_threads[qid].name), "td-queue-%d", qid);
 		pthread_setname_np(tid, server.io_threads[qid].name);
-
-		/* HACK: just to wake up the IO thread */
-		err = tapdisk_server_register_event(SCHEDULER_POLL_TIMEOUT, -1,
-						    TV_USECS(500000),
-						    tapdisk_server_io_dummy, (void*)(long)qid);
 	}
 
+#if 0  // TODO: to be removed
 	server.wake_event_fd = eventfd(0, 0);
 	server.wake_event_count = 0;
 	ASSERT(server.wake_event_fd >= 0);
@@ -992,6 +980,7 @@ tapdisk_server_complete(void)
 						     TV_INF,
 						     tapdisk_server_scheduler_wake_handler,
 						     NULL);
+#endif
 
 	server.run = 1;
 
