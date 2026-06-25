@@ -225,42 +225,48 @@ tapdisk_blktap_put_response(td_blktap_t *tap,
 {
 	blktap_ring_rsp_t *rsp;
 	int op = 0;
-        unsigned long long interval;
-        struct timeval now;
+	unsigned long long interval;
+	struct timeval now;
 
-	pthread_mutex_lock(&tap->mutex);
 	BUG_ON(!tap->vma);
 
-	rsp = BLKTAP_GET_RESPONSE(tap, tap->rsp_prod_pvt);
-
-        gettimeofday(&now, NULL);
-        interval = timeval_to_us(&now) - timeval_to_us(&req->ts);
 	switch (req->vreq.op) {
 	case TD_OP_READ:
 		op = BLKTAP_OP_READ;
-                tap->blktap_stats.stats->read_reqs_completed++;
-                tap->blktap_stats.stats->read_total_ticks += interval;
 		break;
 	case TD_OP_WRITE:
 		op = BLKTAP_OP_WRITE;
-                tap->blktap_stats.stats->write_reqs_completed++;
-                tap->blktap_stats.stats->write_total_ticks += interval;
                 break;
 	default:
 		BUG();
 	}
 
-	if (error)
-		tap->blktap_stats.stats->io_errors++;
+	pthread_mutex_lock(&tap->mutex);
+	rsp = BLKTAP_GET_RESPONSE(tap, tap->rsp_prod_pvt);
 
 	rsp->id        = req->id;
 	rsp->operation = op;
 	rsp->status    = tapdisk_blktap_error_status(tap, error);
 
-	tapdisk_blktap_free_request_locked(tap, req);
-
 	__tapdisk_blktap_push_response_locked(tap, final);
 	pthread_mutex_unlock(&tap->mutex);
+
+	gettimeofday(&now, NULL);
+	interval = timeval_to_us(&now) - timeval_to_us(&req->ts);
+	switch (op) {
+	case BLKTAP_OP_READ:
+		tap->blktap_stats.stats->read_reqs_completed++;
+		tap->blktap_stats.stats->read_total_ticks += interval;
+		break;
+	case BLKTAP_OP_WRITE:
+		tap->blktap_stats.stats->write_reqs_completed++;
+		tap->blktap_stats.stats->write_total_ticks += interval;
+		break;
+	}
+
+	if (error)
+		tap->blktap_stats.stats->io_errors++;
+
 }
 
 static void
@@ -270,6 +276,8 @@ tapdisk_blktap_complete_request(td_blktap_t *tap,
 {
 	if (likely(tap->vma))
 		tapdisk_blktap_put_response(tap, req, error, final);
+
+	tapdisk_blktap_free_request_locked(tap, req);
 }
 
 static void
