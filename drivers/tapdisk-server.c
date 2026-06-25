@@ -458,7 +458,7 @@ tapdisk_server_signal_handler(event_id_t id, char mode __attribute__((unused)), 
 			DBG(TLOG_INFO, "triggering polling on signal %d\n", signal);
 			tapdisk_server_for_each_vbd(vbd, tmp)
 				list_for_each_entry(blkif, &vbd->rings, entry)
-					tapdisk_start_polling(blkif);
+					tapdisk_start_polling_all_queues(blkif);
 			break;
 
 		case SIGHUP:

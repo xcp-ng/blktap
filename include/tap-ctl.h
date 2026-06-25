@@ -160,8 +160,8 @@ int tap_ctl_cancel_commit_job(const int id, const int minor, bool wait);
  */
 int tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int
 		devid, int poll_duration, int poll_idle_threshold,
-		const grant_ref_t * grefs, const int order, const evtchn_port_t
-		port, int proto, const char *pool, const int minor);
+		const grant_ref_t grefs[][MAX_RING_PAGES], const int order, const int queues,
+		const evtchn_port_t* port, int proto, const char *pool, const int minor);
 
 /**
  * Instructs a tapdisk to disconnect from the shared ring.

@@ -43,8 +43,8 @@ struct list_head _td_xenio_ctxs = LIST_HEAD_INIT(_td_xenio_ctxs);
 static void
 tapdisk_xenio_ctx_close(struct td_xenio_ctx * const ctx)
 {
-	if (!ctx)
-		return;
+    if (!ctx)
+        return;
 
     if (ctx->ring_event >= 0) {
         tapdisk_server_unregister_event(ctx->ring_event);
@@ -68,18 +68,18 @@ tapdisk_xenio_ctx_close(struct td_xenio_ctx * const ctx)
 
     list_del(&ctx->entry);
 
-	free(ctx);
+    free(ctx);
 }
 
 /*
  * XXX only called by tapdisk_xenio_ctx_ring_event
  */
-static inline struct td_xenblkif *
-xenio_pending_blkif(struct td_xenio_ctx * const ctx)
+static inline struct td_blkif_queue *
+xenio_pending_queue(struct td_xenio_ctx * const ctx)
 {
     xenevtchn_port_or_error_t port;
     struct td_xenblkif *blkif;
-    int err;
+    int i, err;
 
     ASSERT(ctx);
 
@@ -95,8 +95,12 @@ xenio_pending_blkif(struct td_xenio_ctx * const ctx)
     /*
      * Find the block interface with that local port.
      */
+    /* HACK: this should temporary */
     tapdisk_xenio_ctx_find_blkif(ctx, blkif,
-            blkif->port == port);
+				 ((blkif->nr_queues > 0 && blkif->queues[0].port == port) ||
+				  (blkif->nr_queues > 1 && blkif->queues[1].port == port) ||
+				  (blkif->nr_queues > 2 && blkif->queues[2].port == port) ||
+				  (blkif->nr_queues > 3 && blkif->queues[3].port == port)));
     if (blkif) {
         err = xenevtchn_unmask(ctx->xce_handle, port);
         if (err) {
@@ -104,12 +108,18 @@ xenio_pending_blkif(struct td_xenio_ctx * const ctx)
             return NULL;
         }
     }
+
     /*
      * TODO Is it possible to have an pending event channel but no block
      * interface associated with it?
      */
 
-    return blkif;
+    for (i = 0; blkif && i < blkif->nr_queues; i++) {
+	if (blkif->queues[i].port == port)
+	    return &blkif->queues[i];
+    }
+
+    return NULL;
 }
 
 #define blkif_get_req(dst, src)                 \
@@ -136,17 +146,17 @@ xenio_pending_blkif(struct td_xenio_ctx * const ctx)
  * @param rc the index of the request in the ring
  */
 static inline void
-xenio_blkif_get_request(struct td_xenblkif * const blkif,
-        blkif_request_t *const dst, const RING_IDX idx)
+xenio_blkif_get_request(struct td_blkif_queue * const queue,
+			blkif_request_t *const dst, const RING_IDX idx)
 {
     blkif_back_rings_t * rings;
 
-    ASSERT(blkif);
+    ASSERT(queue);
     ASSERT(dst);
 
-    rings = &blkif->rings;
+    rings = &queue->rings;
 
-    switch (blkif->proto) {
+    switch (queue->blkif->proto) {
         case BLKIF_PROTOCOL_NATIVE:
             {
                 blkif_request_t *src;
@@ -192,35 +202,35 @@ xenio_blkif_get_request(struct td_xenblkif * const blkif,
  *  XXX only called by xenio_blkif_get_requests
  */
 static inline int
-__xenio_blkif_get_requests(struct td_xenblkif * const blkif,
+__xenio_blkif_get_requests(struct td_blkif_queue * const queue,
         blkif_request_t *reqs[], const unsigned int count)
 {
     blkif_common_back_ring_t * ring;
     RING_IDX rp, rc;
     unsigned int n;
-	bool barrier;
+    bool barrier;
 
-    ASSERT(blkif);
+    ASSERT(queue);
     ASSERT(reqs);
 
     if (!count)
         return 0;
 
-    ring = &blkif->rings.common;
+    ring = &queue->rings.common;
 
     rp = ring->sring->req_prod;
     xen_rmb(); /* Ensure we see queued requests up to 'rp'. */
 
     for (rc = ring->req_cons, n = 0, barrier = false;
-			rc != rp && n < count && !barrier;
-			rc++, n++) {
-
+         rc != rp && n < count && !barrier;
+         rc++, n++)
+    {
         blkif_request_t *dst = reqs[n];
 
-        xenio_blkif_get_request(blkif, dst, rc);
+        xenio_blkif_get_request(queue, dst, rc);
 
-		if (unlikely(dst->operation == BLKIF_OP_WRITE_BARRIER))
-			barrier = true;
+        if (unlikely(dst->operation == BLKIF_OP_WRITE_BARRIER))
+            barrier = true;
     }
 
     ring->req_cons = rc;
@@ -241,17 +251,17 @@ __xenio_blkif_get_requests(struct td_xenblkif * const blkif,
  * TODO change name
  */
 static inline int
-xenio_blkif_get_requests(struct td_xenblkif * const blkif,
+xenio_blkif_get_requests(struct td_blkif_queue * const queue,
         blkif_request_t *reqs[], const int count, const bool final)
 {
     blkif_common_back_ring_t * ring;
     int n = 0;
     bool work = false;
 
-    ASSERT(blkif);
+    ASSERT(queue);
     ASSERT(reqs);
 
-    ring = &blkif->rings.common;
+    ring = &queue->rings.common;
 
     do {
         if (final)
@@ -265,10 +275,10 @@ xenio_blkif_get_requests(struct td_xenblkif * const blkif,
         if (n >= count)
             break;
 
-        n += __xenio_blkif_get_requests(blkif, reqs + n, count - n);
+        n += __xenio_blkif_get_requests(queue, reqs + n, count - n);
 
-		if (unlikely(n && reqs[(n - 1)]->operation == BLKIF_OP_WRITE_BARRIER))
-			break;
+        if (unlikely(n && reqs[(n - 1)]->operation == BLKIF_OP_WRITE_BARRIER))
+            break;
 
     } while (1);
 
@@ -276,19 +286,19 @@ xenio_blkif_get_requests(struct td_xenblkif * const blkif,
 }
 
 int
-tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
-		               struct td_xenio_ctx *ctx, bool final)
+tapdisk_xenio_ctx_process_ring(struct td_blkif_queue *queue, bool final)
 {
+    struct td_xenblkif *blkif = queue->blkif;
     int n_reqs;
     int start;
     blkif_request_t **reqs;
     int limit;
 
-    pthread_mutex_lock(&blkif->mutex);
-    start = blkif->n_reqs_free;
+    pthread_mutex_lock(&queue->mutex);
+    start = queue->n_reqs_free;
 
-    if (unlikely(blkif->barrier.msg)) {
-        pthread_mutex_unlock(&blkif->mutex);
+    if (unlikely(queue->barrier.msg)) {
+        pthread_mutex_unlock(&queue->mutex);
         return 0;
     }
 
@@ -299,70 +309,70 @@ tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
      * If in low memory mode, don't copy any if there's some in flight.
      * Otherwise, only copy one.
      */
-	if (tapdisk_server_mem_mode() == LOW_MEMORY_MODE)
-	    limit = blkif->ring_size != blkif->n_reqs_free ? 0 : 1;
+    if (tapdisk_server_mem_mode() == LOW_MEMORY_MODE)
+        limit = queue->ring_size != queue->n_reqs_free ? 0 : 1;
     else
-	    limit = blkif->n_reqs_free;
+        limit = queue->n_reqs_free;
 
     do {
-        reqs = &blkif->reqs_free[blkif->ring_size - blkif->n_reqs_free];
+        reqs = &queue->reqs_free[queue->ring_size - queue->n_reqs_free];
 
         ASSERT(reqs);
 
-        n_reqs = xenio_blkif_get_requests(blkif, reqs, limit, final);
+        n_reqs = xenio_blkif_get_requests(queue, reqs, limit, final);
         ASSERT(n_reqs >= 0);
         if (!n_reqs)
             break;
 
-        blkif->n_reqs_free -= n_reqs;
-		ASSERT(blkif->n_reqs_free <= blkif->ring_size);
-		limit -= n_reqs;
+        queue->n_reqs_free -= n_reqs;
+        ASSERT(queue->n_reqs_free <= queue->ring_size);
+        limit -= n_reqs;
         final = 1;
 
-		if (unlikely(reqs[(n_reqs - 1)]->operation ==
-					BLKIF_OP_WRITE_BARRIER)) {
-			ASSERT(!blkif->barrier.msg);
-			blkif->barrier.msg = reqs[(n_reqs - 1)];
-			blkif->barrier.io_done = false;
-			blkif->barrier.io_err = 0;
-			break;
-		}
+        if (unlikely(reqs[(n_reqs - 1)]->operation ==
+                     BLKIF_OP_WRITE_BARRIER)) {
+            ASSERT(!queue->barrier.msg);
+            queue->barrier.msg = reqs[(n_reqs - 1)];
+            queue->barrier.io_done = false;
+            queue->barrier.io_err = 0;
+            break;
+        }
 
     } while (1);
 
-    n_reqs = start - blkif->n_reqs_free;
+    n_reqs = start - queue->n_reqs_free;
 
     if (!n_reqs) {
-		/*
-		 * We got a notification but the ring is empty. This is because we had
-		 * previously suspended the operation of the ring because of a
-		 * VBD.pause but when we completed a request prior to the pause we
-		 * checked the ring for new requests. If there were request in the ring
-		 * at that time, we consumed them but we did not consume the
-		 * notification. This notification is the one we should have consumed,
-		 * and can be ignored.
-		 */
-		pthread_mutex_unlock(&blkif->mutex);
-		return 0;
+        /*
+         * We got a notification but the ring is empty. This is because we had
+         * previously suspended the operation of the ring because of a
+         * VBD.pause but when we completed a request prior to the pause we
+         * checked the ring for new requests. If there were request in the ring
+         * at that time, we consumed them but we did not consume the
+         * notification. This notification is the one we should have consumed,
+         * and can be ignored.
+         */
+        pthread_mutex_unlock(&queue->mutex);
+        return 0;
     }
 
-    if (blkif->in_polling)
+    if (queue->in_polling)
         /* We found at least one request, so keep polling some more */
-        tapdisk_xenblkif_sched_stoppolling(blkif);
+        tapdisk_xenblkif_sched_stoppolling(queue);
     else if (blkif->poll_duration)
         /* We weren't polling, but polling is enabled, so let's start now */
-        tapdisk_start_polling(blkif);
+        tapdisk_start_polling(queue);
 
     blkif->stats.reqs.in += n_reqs;
 
-	reqs = alloca(sizeof(blkif_request_t*) * n_reqs);
-	memcpy(reqs, &blkif->reqs_free[blkif->ring_size - start],
-			sizeof(blkif_request_t*) * n_reqs);
-	pthread_mutex_unlock(&blkif->mutex);
+    reqs = alloca(sizeof(blkif_request_t*) * n_reqs);
+    memcpy(reqs, &queue->reqs_free[queue->ring_size - start],
+           sizeof(blkif_request_t*) * n_reqs);
+    pthread_mutex_unlock(&queue->mutex);
 
-	tapdisk_xenblkif_queue_requests(blkif, reqs, n_reqs);
+    tapdisk_xenblkif_queue_requests(queue, reqs, n_reqs);
 
-	return n_reqs;
+    return n_reqs;
 }
 
 /**
@@ -375,19 +385,20 @@ tapdisk_xenio_ctx_ring_event(event_id_t id __attribute__((unused)),
         char mode __attribute__((unused)), void *private)
 {
     struct td_xenio_ctx *ctx = private;
-    struct td_xenblkif *blkif = NULL;
+    struct td_blkif_queue *queue = NULL;
 
     ASSERT(ctx);
 
-    blkif = xenio_pending_blkif(ctx);
-    if (!blkif) {
+    queue = xenio_pending_queue(ctx);
+    if (!queue) {
         /* TODO log error */
         return;
     }
 
-    blkif->stats.kicks.in++;
+    queue->stats.kicks.in++;
+    queue->blkif->stats.kicks.in++;
 
-    tapdisk_xenio_ctx_process_ring(blkif, ctx, false);
+    tapdisk_xenio_ctx_process_ring(queue, false);
 }
 
 /* NB. may be NULL, but then the image must be bouncing I/O */
@@ -396,7 +407,7 @@ tapdisk_xenio_ctx_ring_event(event_id_t id __attribute__((unused)),
 /**
  * Opens a context on the specified pool.
  *
- * @param pool the pool, it can either be NULL or a non-zero length string
+ * @param pool_name the pool, it can either be NULL or a non-zero length string
  * @returns 0 in success, -errno on error
  *
  * TODO The pool is ignored, we always open the default pool.
@@ -456,7 +467,7 @@ tapdisk_xenio_ctx_open(const char *pool_name)
     }
 
     ctx->ring_event = tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
-        fd, TV_ZERO, tapdisk_xenio_ctx_ring_event, ctx);
+                                                    fd, TV_ZERO, tapdisk_xenio_ctx_ring_event, ctx);
     if (ctx->ring_event < 0) {
         err = ctx->ring_event;
         ERROR("failed to register event: %s\n", strerror(-err));
@@ -480,12 +491,12 @@ fail:
 static inline int
 __td_xenio_ctx_match(struct td_xenio_ctx * ctx, const char *pool_name)
 {
-	if (unlikely(!pool_name)) {
-		assert(TD_XENBLKIF_DEFAULT_POOL);
-		return !strcmp(ctx->pool_name, TD_XENBLKIF_DEFAULT_POOL);
-	}
+        if (unlikely(!pool_name)) {
+                assert(TD_XENBLKIF_DEFAULT_POOL);
+                return !strcmp(ctx->pool_name, TD_XENBLKIF_DEFAULT_POOL);
+        }
 
-	return !strcmp(ctx->pool_name, pool_name);
+        return !strcmp(ctx->pool_name, pool_name);
 }
 
 #define tapdisk_xenio_find_ctx(_ctx, _cond)     \

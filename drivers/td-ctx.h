@@ -89,8 +89,7 @@ tapdisk_xenio_ctx_put(struct td_xenio_ctx * ctx);
  * Process requests on the ring, if any. Returns the number of requests found.
  */
 int
-tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
-		struct td_xenio_ctx *ctx, bool final);
+tapdisk_xenio_ctx_process_ring(struct td_blkif_queue *queue, bool final);
 
 /**
  * List of contexts.
@@ -108,16 +107,16 @@ extern struct list_head _td_xenio_ctxs;
  * Dead block interfaces are ignored.
  */
 #define tapdisk_xenio_ctx_find_blkif(_ctx, _blkif, _cond)	\
-	do {													\
-		int found = 0;										\
-		tapdisk_xenio_for_each_blkif(_blkif, _ctx) {		\
-			if (!_blkif->dead && _cond) {                   \
-				found = 1;									\
-				break;										\
-			}												\
-		}													\
-		if (!found)											\
-			_blkif = NULL;									\
-	} while (0)
+    do {							\
+	int found = 0;						\
+	tapdisk_xenio_for_each_blkif(_blkif, _ctx) {		\
+	    if (!_blkif->dead && _cond) {			\
+		found = 1;					\
+		break;						\
+	    }							\
+	}							\
+	if (!found)						\
+	    _blkif = NULL;					\
+    } while (0)
 
 #endif /* __TD_CTX_H__ */

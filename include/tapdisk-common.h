@@ -31,7 +31,7 @@
 #ifndef _TAPDISK_COMMON_H_
 #define _TAPDISK_COMMON_H_
 
-#define BLKIF_MAX_QUEUES           1
+#define BLKIF_MAX_QUEUES           4
 
 #define TAPDISK_MAX_VBD_THREADS    BLKIF_MAX_QUEUES
 

@@ -52,6 +52,7 @@
 
 #include "list.h"
 #include "compiler.h"
+#include "tapdisk-common.h"
 #include "tapdisk-log.h"
 #include "tapdisk-utils.h"
 #include "tapdisk-stats.h"

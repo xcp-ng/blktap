@@ -606,13 +606,13 @@ tapdisk_control_attach_vbd(struct tapdisk_ctl_conn *conn,
 	 * TODO: check for max vbds per process
 	 */
 
-	vbd = tapdisk_server_get_vbd(request->cookie);
+	minor = request->cookie;
+	vbd = tapdisk_server_get_vbd(minor);
 	if (vbd) {
 		err = -EEXIST;
 		goto out;
 	}
 
-	minor = request->cookie;
 	if (minor < 0) {
 		err = -EINVAL;
 		goto out;
@@ -1201,67 +1201,67 @@ out:
  */
 static int
 tapdisk_control_xenblkif_connect(
-        struct tapdisk_ctl_conn *conn __attribute__((unused)),
-        tapdisk_message_t *request, tapdisk_message_t * const response, td_err *error)
+	struct tapdisk_ctl_conn *conn __attribute__((unused)),
+	tapdisk_message_t *request, tapdisk_message_t * const response, td_err *error)
 {
-    /*
-     * Get the block interface parameters (domain ID, device ID, etc.).
-     */
-    tapdisk_message_blkif_t *blkif;
+	/*
+	 * Get the block interface parameters (domain ID, device ID, etc.).
+	 */
+	tapdisk_message_blkif_t *blkif;
 
-    td_vbd_t *vbd = NULL;
-    const char *pool_name;
-    size_t len;
-    int err;
+	td_vbd_t *vbd = NULL;
+	const char *pool_name;
+	size_t len;
+	int err;
 	int minor = -1;
 
-    ASSERT(conn);
-    ASSERT(request);
-    ASSERT(response);
+	ASSERT(conn);
+	ASSERT(request);
+	ASSERT(response);
 
 	td_err_init_errno(error);
 	minor = request->cookie;
 
-    vbd = tapdisk_server_get_vbd(minor);
-    if (!vbd) {
-        err = -ENODEV;
+	vbd = tapdisk_server_get_vbd(minor);
+	if (!vbd) {
+		err = -ENODEV;
 		goto out;
-    }
+	}
 
-    blkif = &request->u.blkif;
-    len = strnlen(blkif->pool_name, sizeof(blkif->pool_name));
-    if (!len)
-        pool_name = NULL;
-    else if (len >= sizeof(blkif->pool_name)) {
-        err = -EINVAL;
+	blkif = &request->u.blkif;
+	len = strnlen(blkif->pool_name, sizeof(blkif->pool_name));
+	if (!len)
+		pool_name = NULL;
+	else if (len >= sizeof(blkif->pool_name)) {
+		err = -EINVAL;
 		goto out;
-    } else
-        pool_name = blkif->pool_name;
+	} else
+		pool_name = blkif->pool_name;
 
-    DPRINTF("connecting VBD %d domid=%d, devid=%d, queues=%d,"
-	    " persistent-grants=%s,"
-	    " indirect-segs=%s (max %d),"
-	    " pool %s, evt %d, poll duration %d, poll idle threshold %d\n",
-	    vbd->uuid, blkif->domid, blkif->devid, blkif->nr_queues,
-	    blkif->persistent_grants ? "yes":"no",
-	    blkif->indirect_max_segments ? "enabled":"disabled", blkif->indirect_max_segments,
-	    pool_name, blkif->ports[0], blkif->poll_duration, blkif->poll_idle_threshold);
+	DPRINTF("connecting VBD %d domid=%d, devid=%d, queues=%d,"
+		" persistent-grants=%s,"
+		" indirect-segs=%s (max %d),"
+		" pool %s, evt %d, poll duration %d, poll idle threshold %d\n",
+		vbd->uuid, blkif->domid, blkif->devid, blkif->nr_queues,
+		blkif->persistent_grants ? "yes":"no",
+		blkif->indirect_max_segments ? "enabled":"disabled", blkif->indirect_max_segments,
+		pool_name, blkif->ports[0], blkif->poll_duration, blkif->poll_idle_threshold);
 
-    err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid, &blkif->gref[0][0],
-				blkif->order, blkif->ports[0], blkif->persistent_grants,
+	err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid, blkif->gref,
+				blkif->order, blkif->nr_queues, blkif->ports, blkif->persistent_grants,
 				blkif->indirect_max_segments,
 				blkif->proto, blkif->poll_duration, blkif->poll_idle_threshold,
 				pool_name, vbd);
 
 out:
 	response->cookie = request->cookie;
-    if (!err)
-        response->type = TAPDISK_MESSAGE_XENBLKIF_CONNECT_RSP;
-    else
+	if (!err)
+		response->type = TAPDISK_MESSAGE_XENBLKIF_CONNECT_RSP;
+	else
 		EPRINTF("VBD %d failed to connect to the shared ring: %s\n",
-				minor, strerror(-err));
+			minor, strerror(-err));
 
-    return td_err_set_errno(error, err);
+	return td_err_set_errno(error, err);
 }
 
 static int
