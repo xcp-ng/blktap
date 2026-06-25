@@ -1107,7 +1107,9 @@ tapdisk_vbd_pause(td_vbd_t *vbd)
 		INFO("pause requested\n");
 	}
 
+	pthread_mutex_lock(&vbd->mutex);
 	td_flag_set(vbd->state, TD_VBD_PAUSE_REQUESTED);
+	pthread_mutex_unlock(&vbd->mutex);
 
 	if (vbd->nbdserver)
 		tapdisk_nbdserver_pause(vbd->nbdserver, log);
@@ -1469,21 +1471,36 @@ FIXME_maybe_count_enospc_redirect(td_vbd_t *vbd, td_request_t treq)
 		vbd->FIXME_enospc_redirect_count += treq.secs;
 }
 
-static int
+static bool
 __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
 				  td_request_t treq, int res)
 {
 	td_image_t *image = treq.image;
 	td_vbd_t* vbd = queue->vbd;
-	int err, notify;
-
+	int err, old_error, prev_error;
+	bool notify;
         long long interval;
+	struct timeval ts;
 
 	err = (res <= 0 ? res : -res);
+
 	pthread_mutex_lock(&vbd->mutex);
 	pthread_mutex_lock(&queue->mutex);
+
+	if (err) {
+		vreq->error = (vreq->error ? : err);
+	}
+
+	ts = vreq->ts;
+	old_error = vreq->error;
+	prev_error = vreq->prev_error;
+
 	queue->secs_pending -= treq.secs;
 	vreq->secs_pending  -= treq.secs;
+
+	notify = tapdisk_vbd_complete_vbd_request(queue, vreq);
+	pthread_mutex_unlock(&queue->mutex);
+	pthread_mutex_unlock(&vbd->mutex);
 
 	if (err != -EBUSY) {
 		int write = treq.op == TD_OP_WRITE;
@@ -1494,22 +1511,17 @@ __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
 		FIXME_maybe_count_enospc_redirect(vbd, treq);
 	}
 
-	if (err) {
-		if (err != -EBUSY) {
-			if (!vreq->error &&
-			    err != vreq->prev_error)
-				tlog_drv_error(image->driver, err,
-					       "req: %s %s 0x%04x secs @ 0x%08"PRIx64" - %s",
-					       op_strings[treq.op],
-					       image->name,
-					       treq.secs, treq.sec, strerror(abs(err)));
-			// TODO: add protection ?
-			queue->vbd->errors++;
-		}
-		vreq->error = (vreq->error ? : err);
+	if (err && err != -EBUSY) {
+		if (!old_error && err != prev_error)
+			tlog_drv_error(image->driver, err,
+				"req: %s %s 0x%04x secs @ 0x%08"PRIx64" - %s",
+				op_strings[treq.op],
+				image->name,
+				treq.secs, treq.sec, strerror(abs(err)));
+		queue->vbd->errors++;
 	}
 
-        interval = timeval_to_us(&queue->ts) - timeval_to_us(&vreq->ts);
+	interval = timeval_to_us(&queue->ts) - timeval_to_us(&ts);
 
 	switch (treq.op) {
         case TD_OP_READ:
@@ -1523,10 +1535,6 @@ __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
             vbd->vdi_stats.stats->write_total_ticks += interval;
 	    break;
         }
-
-	notify = tapdisk_vbd_complete_vbd_request(queue, vreq);
-	pthread_mutex_unlock(&queue->mutex);
-	pthread_mutex_unlock(&vbd->mutex);
 
 	return notify;
 }
