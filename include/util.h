@@ -23,6 +23,8 @@
 
 #define ARRAY_SIZE(_a) (sizeof(_a)/sizeof((_a)[0]))
 
+#define __unused __attribute__((unused))
+
 /*
  * Strncpy variant that guarantees to terminate the string
  */
