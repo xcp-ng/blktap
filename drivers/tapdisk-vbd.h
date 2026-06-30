@@ -122,6 +122,25 @@ struct td_vbd_handle {
 	struct list_head            pending_requests;
 	struct list_head            failed_requests;
 	struct list_head            completed_requests;
+
+	/*
+	 * Lock ordering (outermost first):
+	 *
+	 *   1. vbd->mutex
+	 *   2. blkif->mutex        (td_xenblkif)
+	 *   3. scheduler->mutex
+	 *
+	 * tapdisk_vbd_kick() calls completion callbacks (e.g.
+	 * __tapdisk_xenblkif_request_cb) while holding vbd->mutex;
+	 * those callbacks may acquire blkif->mutex.  Never acquire
+	 * vbd->mutex while holding blkif->mutex or scheduler->mutex.
+	 *
+	 * For threaded drivers (TD_DRIVER_THREADED), the worker thread
+	 * (e.g. block-qcow2) calls td_complete_request() then
+	 * tapdisk_vbd_kick(vbd, true), both of which acquire
+	 * vbd->mutex.  The main thread acquires vbd->mutex via
+	 * tapdisk_vbd_issue_requests().
+	 */
 	pthread_mutex_t             mutex;
 
 	struct list_head            next;
