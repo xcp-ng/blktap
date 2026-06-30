@@ -336,7 +336,7 @@ static inline void qemu_futex_wait(QemuEvent *ev, unsigned val)
 {
     assert(ev->initialized);
     pthread_mutex_lock(&ev->lock);
-    if (ev->value == val) {
+    while (ev->value == val) {
         pthread_cond_wait(&ev->cond, &ev->lock);
     }
     pthread_mutex_unlock(&ev->lock);
