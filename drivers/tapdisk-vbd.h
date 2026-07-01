@@ -81,10 +81,10 @@ struct td_vbd_handle {
 	struct list_head           rings;
 
 	/**
-	 * List of rings that contain pending requests but a disconnection was
-	 * issued. We need to maintain these rings until all their pending requests
-	 * complete. When the last request completes, the ring is destroyed and
-	 * removed from this list.
+	 * List of blkifs for which a disconnection was issued. We need to
+	 * maintain them until all their pending requests complete. Once every
+	 * queue is drained, the reaper on the main thread destroys the blkif
+	 * and removes it from this list.
 	 */
 	struct list_head            dead_rings;
 

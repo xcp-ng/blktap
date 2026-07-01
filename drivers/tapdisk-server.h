@@ -72,6 +72,12 @@ void tapdisk_server_mask_io_event(td_queue_id_t qid, event_id_t, int);
 void tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int);
 void tapdisk_server_io_scheduler_wake(td_queue_id_t);
 
+/*
+ * Callable from IO threads: asks the main thread to reap the dead
+ * blkifs (destroy those whose queues are all drained).
+ */
+void tapdisk_server_reaper_wake(void);
+
 int tapdisk_server_init(void);
 int tapdisk_server_initialize(const char *, const char *);
 int tapdisk_server_complete(void);

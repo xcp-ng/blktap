@@ -285,11 +285,49 @@ tapdisk_xenblkif_reqs_pending(const struct td_blkif_queue * const queue)
 }
 
 
+/**
+ * Destroys the block interface once it is fully drained. Must only be
+ * called from the main thread, the sole owner of blkif teardown: IO
+ * threads wake the reaper (tapdisk_server_reaper_wake()) instead of
+ * destroying anything themselves.
+ *
+ * Taking and releasing each queue's lock is a handshake: the completion
+ * epilogue runs under the lock, so a queue observed drained here cannot
+ * have an IO thread still inside its critical section. New requests
+ * cannot come in either: process_ring bails out on dead blkifs.
+ *
+ * @param blkif a dead block interface
+ * @returns true if the block interface was destroyed
+ */
+bool
+tapdisk_xenblkif_reap(struct td_xenblkif *blkif)
+{
+    ASSERT(blkif);
+    ASSERT(blkif->dead);
+
+    for (int qid = 0; qid < blkif->nr_queues; qid++) {
+        struct td_blkif_queue *queue = &blkif->queues[qid];
+        bool pending;
+
+        pthread_mutex_lock(&queue->mutex);
+        pending = tapdisk_xenblkif_reqs_pending(queue) != 0;
+        pthread_mutex_unlock(&queue->mutex);
+
+        if (pending)
+            return false;
+    }
+
+    RING_DEBUG(blkif, "destroying dead ring\n");
+    tapdisk_xenblkif_destroy(blkif);
+
+    return true;
+}
+
+
 int
 tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
 {
     int err;
-    bool pending = false;
     struct td_xenblkif *blkif;
 
     blkif = tapdisk_xenblkif_find(domid, devid);
@@ -306,38 +344,38 @@ tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
                 RING_ERR(blkif, "disconnect from ring with %d pending requests "
                          "and the VBD paused\n",
                          queue->ring_size - queue->n_reqs_free);
-
-            if (queue->ctx) {
-                tapdisk_xenio_ctx_unbind_queue(queue->ctx, queue);
-            }
-
-            if (!blkif->dead) {
-                list_move(&blkif->entry, &blkif->vbd->dead_rings);
-                blkif->dead = true;
-
-                err = td_metrics_vbd_stop(&blkif->vbd_stats);
-                if (unlikely(err))
-                    EPRINTF("failed to destroy blkfront stats file: %s\n", strerror(-err));
-
-                err = tapdisk_xenblkif_stats_destroy(blkif);
-                if (unlikely(err))
-                    EPRINTF("failed to clean up ring stats file: %s (error ignored)\n",
-                            strerror(-err));
-            }
-
-            pending = true;
         }
     }
 
-    if (pending)
+    if (!blkif->dead) {
         /*
-         * FIXME shall we unmap the ring or will that lead to some fatal error
-         * in tapdisk? IIUC if we don't unmap it we'll get errors during grant
-         * copy.
+         * Mark the blkif dead first: process_ring bails out on dead
+         * blkifs, so no new request can be picked up once this store is
+         * visible. Event channels and ring mappings stay in place until
+         * tapdisk_xenblkif_destroy() -- spurious events are ignored
+         * thanks to the dead check, and in-flight completions still need
+         * the ring to drain.
          */
-        return 0;
-    else
-        return tapdisk_xenblkif_destroy(blkif);
+        blkif->dead = true;
+        list_move(&blkif->entry, &blkif->vbd->dead_rings);
+
+        err = td_metrics_vbd_stop(&blkif->vbd_stats);
+        if (unlikely(err))
+            EPRINTF("failed to destroy blkfront stats file: %s\n", strerror(-err));
+
+        err = tapdisk_xenblkif_stats_destroy(blkif);
+        if (unlikely(err))
+            EPRINTF("failed to clean up ring stats file: %s (error ignored)\n",
+                    strerror(-err));
+    }
+
+    /*
+     * Destroy right away if every queue is already drained; otherwise the
+     * IO threads wake the reaper when the last request completes.
+     */
+    tapdisk_xenblkif_reap(blkif);
+
+    return 0;
 }
 
 

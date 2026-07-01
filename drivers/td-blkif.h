@@ -278,6 +278,16 @@ int
 tapdisk_xenblkif_destroy(struct td_xenblkif * blkif);
 
 /**
+ * Destroys a dead block interface if all its queues are drained.
+ * Main thread only.
+ *
+ * @param blkif a dead block interface
+ * @returns true if the block interface was destroyed
+ */
+bool
+tapdisk_xenblkif_reap(struct td_xenblkif *blkif);
+
+/**
  * Searches all block interfaces in all contexts for a block interface
  * having the specified domain and device ID. Dead block interfaces are
  * ignored.

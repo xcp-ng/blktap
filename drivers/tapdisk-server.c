@@ -101,6 +101,14 @@ typedef struct tapdisk_server {
 	event_id_t                   tlog_reopen_evid;
 	event_id_t                   signal_handler_evid;
 	int			     sigfd;
+
+	/*
+	 * Written by IO threads when the last request of a dead blkif
+	 * completes; the handler on the main scheduler reaps the dead
+	 * blkifs (see tapdisk_xenblkif_reap()).
+	 */
+	int                          reaper_eventfd;
+	event_id_t                   reaper_evid;
 } tapdisk_server_t;
 
 static tapdisk_server_t server;
@@ -321,6 +329,38 @@ tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int seconds)
 	scheduler_set_max_timeout(&server.io_threads[qid].scheduler, TV_SECS(seconds));
 }
 
+void
+tapdisk_server_reaper_wake(void)
+{
+	uint64_t incr = 1;
+	int n;
+
+	if (server.reaper_eventfd == -1)
+		return;
+
+	n = write(server.reaper_eventfd, &incr, sizeof(incr));
+	ASSERT(n == 8);
+}
+
+static void
+tapdisk_server_reaper_event(event_id_t id __attribute__((unused)),
+			    char mode __attribute__((unused)),
+			    void *private __attribute__((unused)))
+{
+	td_vbd_t *vbd, *tmp;
+	uint64_t cnt;
+	int n;
+
+	n = read(server.reaper_eventfd, &cnt, sizeof(cnt));
+	ASSERT(n == 8);
+
+	tapdisk_server_for_each_vbd(vbd, tmp) {
+		struct td_xenblkif *blkif, *tmpb;
+
+		list_for_each_entry_safe(blkif, tmpb, &vbd->dead_rings, entry)
+			tapdisk_xenblkif_reap(blkif);
+	}
+}
 
 static void
 tapdisk_server_set_retry_timeout(td_queue_id_t qid)
@@ -477,6 +517,12 @@ static void
 tapdisk_server_close(void)
 {
 	tapdisk_server_io_thread_release();
+
+	if (likely(server.reaper_evid >= 0))
+		tapdisk_server_unregister_event(server.reaper_evid);
+
+	if (likely(server.reaper_eventfd != -1))
+		close(server.reaper_eventfd);
 
 	if (likely(server.tlog_reopen_evid >= 0))
 		tapdisk_server_unregister_event(server.tlog_reopen_evid);
@@ -906,6 +952,8 @@ tapdisk_server_init(void)
 
 	server.tlog_reopen_evid = -1;
 	server.signal_handler_evid = -1;
+	server.reaper_eventfd = -1;
+	server.reaper_evid = -1;
 
 	scheduler_initialize(&server.scheduler);
 
@@ -977,7 +1025,6 @@ tapdisk_server_io_thread_init(void)
 			goto fail;
 		}
 		server.io_threads[qid].eventfd = fd;
-
 		server.io_threads[qid].eventid =
 			tapdisk_server_register_io_event(qid,
 							 SCHEDULER_POLL_READ_FD,
@@ -1034,6 +1081,23 @@ tapdisk_server_complete(void)
 	err = tapdisk_server_open_tlog();
 	if (err)
 		goto fail;
+
+	/* Must exist before the IO threads that write to it are started. */
+	server.reaper_eventfd = eventfd(0, 0);
+	if (server.reaper_eventfd == -1) {
+		err = -errno;
+		EPRINTF("failed to create reaper eventfd: %s\n", strerror(errno));
+		goto fail;
+	}
+
+	err = tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
+					    server.reaper_eventfd, TV_INF,
+					    tapdisk_server_reaper_event, NULL);
+	if (err < 0) {
+		EPRINTF("failed to register reaper event: %s\n", strerror(-err));
+		goto fail;
+	}
+	server.reaper_evid = err;
 
 	err = tapdisk_server_io_thread_init();
 	if (err)

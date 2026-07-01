@@ -451,17 +451,18 @@ out:
 
 
 /**
- * Completes a request. If this is the last pending request of a dead block
- * interface, the block interface is destroyed, the caller must not access it
- * any more.
+ * Completes a request. Never destroys the block interface: when the last
+ * pending request of a dead block interface completes, the reaper on the
+ * main thread is woken up and performs the destruction once every queue
+ * is drained (see tapdisk_xenblkif_reap()).
  *
  * @blkif the VBD the request belongs belongs to
  * @req the request to complete
  * @error completion status of the request
  * @final controls whether the other end should be notified
- * @lock must always be true except in this function to control recursion
+ * @lock false when the caller already holds queue->mutex (barrier paths)
  */
-static bool
+static void
 tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 		struct td_xenblkif_req* req, int err, const bool final,
 		bool lock)
@@ -469,8 +470,8 @@ tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 	int _err;
 	long long *max = NULL, *sum = NULL, *cnt = NULL;
 	bool processing_barrier_message;
-	bool blkif_destroyed = false;
 	uint64_t *ticks = NULL;
+	bool drained = false;
 
 	ASSERT(queue);
 	ASSERT(req);
@@ -582,46 +583,25 @@ tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 		/*
 		 * If this is the last request, complete the barrier request.
 		 */
-		if (tapdisk_xenblkif_barrier_should_complete(queue)) {
-			blkif_destroyed = tapdisk_xenblkif_complete_request(queue,
-					msg_to_tapreq(queue->barrier.msg), 0, 1, false);
-			/*
-			 * blkif_destroyed must be false here: the recursive call
-			 * above runs with queue->complete_depth > 1, so it cannot
-			 * take the ring-destruction branch. It must not, since we
-			 * still dereference queue and blkif below.
-			 */
-			ASSERT(!blkif_destroyed);
-		}
+		if (tapdisk_xenblkif_barrier_should_complete(queue))
+			tapdisk_xenblkif_complete_request(queue,
+					msg_to_tapreq(queue->barrier.msg), 0, true, false);
 	}
 
 	/*
-	 * Last request of a dead ring completes, destroy the ring.
+	 * Last request of a dead ring completed: wake up the reaper on the
+	 * main thread, which destroys the blkif once every queue is drained.
+	 * IO threads never destroy the blkif themselves.
 	 */
-	if (unlikely(1 == queue->complete_depth
-		&& blkif->dead
-		&& !tapdisk_xenblkif_reqs_pending(queue))) {
-
-		RING_DEBUG(blkif, "destroying dead ring\n");
-		queue->complete_depth--;
-		/*
-		 * Unlock before destroy: tapdisk_xenblkif_destroy() frees the
-		 * blkif and its queues (mutex included), so don't touch the
-		 * queue past this point.
-		 */
-		pthread_mutex_unlock(&queue->mutex);
-		tapdisk_xenblkif_destroy(blkif);
-		blkif_destroyed = true;
-		lock = false; /* blkif with its mutex were destroyed above so don't try to unlock it */
-	}
+	drained = unlikely(blkif->dead) && !tapdisk_xenblkif_reqs_pending(queue);
 
 out:
-	if (!blkif_destroyed) {
-		queue->complete_depth--;
-		if (lock)
-			pthread_mutex_unlock(&queue->mutex);
-	}
-	return blkif_destroyed;
+	queue->complete_depth--;
+	if (lock)
+		pthread_mutex_unlock(&queue->mutex);
+
+	if (unlikely(drained))
+		tapdisk_server_reaper_wake();
 }
 
 /**
@@ -798,7 +778,6 @@ tapdisk_xenblkif_make_vbd_request(struct td_blkif_queue* queue,
     int err = 0;
     td_vbd_request_t *vreq;
     struct td_xenblkif * const blkif = queue->blkif;
-    bool blkif_freed = false;
 
     ASSERT(queue);
     ASSERT(req);
@@ -863,12 +842,11 @@ tapdisk_xenblkif_make_vbd_request(struct td_blkif_queue* queue,
     } else {
         pthread_mutex_lock(&queue->mutex);
         if (tapdisk_xenblkif_barrier_should_complete(queue)) {
-            blkif_freed = tapdisk_xenblkif_complete_request(queue,
-                    msg_to_tapreq(queue->barrier.msg), 0, 1, false);
+            tapdisk_xenblkif_complete_request(queue,
+                    msg_to_tapreq(queue->barrier.msg), 0, true, false);
             err = 0;
         }
-        if (!blkif_freed)
-            pthread_mutex_unlock(&queue->mutex);
+        pthread_mutex_unlock(&queue->mutex);
     }
 out:
     return err;
@@ -936,12 +914,11 @@ tapdisk_xenblkif_queue_requests(struct td_blkif_queue * const queue,
     int i;
     int err;
     int nr_errors = 0;
-    bool blkif_freed = false;
 
     ASSERT(reqs);
     ASSERT(nr_reqs >= 0);
 
-    for (i = 0; i < nr_reqs && !blkif_freed; i++) { /* for each request in the ring... */
+    for (i = 0; i < nr_reqs; i++) { /* for each request in the ring... */
         blkif_request_t *msg = reqs[i];
         struct td_xenblkif_req *req;
 
@@ -955,14 +932,11 @@ tapdisk_xenblkif_queue_requests(struct td_blkif_queue * const queue,
         if (err) {
             /* TODO log error */
             nr_errors++;
-            blkif_freed = tapdisk_xenblkif_complete_request(queue, req, err, 1, true);
+            tapdisk_xenblkif_complete_request(queue, req, err, 1, true);
         }
     }
 
-    /* there is a possibility of blkif getting freed if ring is 
-       dead and current request is the last one, hence adding 
-       this check to avoid seg fault */
-    if (nr_errors && !blkif_freed) {
+    if (nr_errors) {
 	struct td_xenblkif * const blkif = queue->blkif;
 
 	ASSERT(blkif);

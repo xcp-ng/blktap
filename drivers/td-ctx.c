@@ -245,6 +245,15 @@ tapdisk_xenio_ctx_process_ring(struct td_blkif_queue *queue, bool final)
     pthread_mutex_lock(&queue->mutex);
     start = queue->n_reqs_free;
 
+    /*
+     * The blkif is being torn down: stop taking new requests so the drain
+     * state observed by tapdisk_xenblkif_reap() is stable.
+     */
+    if (unlikely(blkif->dead)) {
+        pthread_mutex_unlock(&queue->mutex);
+        return 0;
+    }
+
     if (unlikely(queue->barrier.msg)) {
         pthread_mutex_unlock(&queue->mutex);
         return 0;

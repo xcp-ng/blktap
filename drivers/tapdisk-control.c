@@ -941,9 +941,11 @@ tapdisk_control_close_image(struct tapdisk_ctl_conn *conn,
 
 	if(request->type != TAPDISK_MESSAGE_FORCE_SHUTDOWN) {
 		/*
-		 * Wait for requests against dead rings to complete, otherwise, if we
-		 * proceed with tearing down the VBD, we will free memory that will later
-		 * be accessed by these requests, and this will lead to a crash.
+		 * Wait for requests against dead blkifs to complete, otherwise, if
+		 * we proceed with tearing down the VBD, we will free memory that
+		 * will later be accessed by these requests, and this will lead to
+		 * a crash. The reaper event destroys the drained blkifs as this
+		 * loop iterates the main scheduler.
 		 */
 
 		/* There's no concurrency issue since we are already called
@@ -960,7 +962,7 @@ tapdisk_control_close_image(struct tapdisk_ctl_conn *conn,
 			tapdisk_server_iterate();
 	}
 	else {
-		DPRINTF("Ignoring dead rings in forced shutdown mode\n");
+		DPRINTF("Ignoring dead blkifs in forced shutdown mode\n");
 	}
 
 	if (!err) {

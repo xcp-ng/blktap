@@ -82,6 +82,11 @@ tapdisk_server_io_event_set_timeout(td_queue_id_t qid, event_id_t id,
 	return 0;
 }
 
+void
+tapdisk_server_reaper_wake(void)
+{
+}
+
 int
 tapdisk_vbd_queue_request(td_vbd_t *vbd, td_vbd_request_t *vreq,
 		td_queue_id_t qid, bool locked)
