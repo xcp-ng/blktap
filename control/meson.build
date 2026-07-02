@@ -12,9 +12,12 @@ blktapctl_sources = [
     'tap-ctl-close.c',
     'tap-ctl-pause.c',
     'tap-ctl-unpause.c',
+    'tap-ctl-major.c',
+    'tap-ctl-check.c',
     'tap-ctl-stats.c',
     'tap-ctl-xen.c',
     'tap-ctl-info.c',
+    'tap-ctl-commit.c',
     ]
 
 c_flags = [

@@ -1,1 +1,2 @@
-option('GCOV', type : 'boolean', value : false, description : 'test build')
+option('GCOV', type : 'boolean', value : false, description : 'test build with coverage instrumentation')
+option('tests', type : 'boolean', value : false, description : 'build mockatests test programs')

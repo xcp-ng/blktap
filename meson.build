@@ -17,7 +17,12 @@ if gcov == true
   c_args_tests = ['-fprofile-arcs', '-ftest-coverage']
 endif
 
-incdir = include_directories('include')
+conf_data = configuration_data()
+conf_data.set('_BLKTAP', 1)
+
+configure_file(output : 'config.h', configuration : conf_data)
+
+incdir = include_directories('.', 'include')
 
 uuid_dep = dependency('uuid')
 
@@ -26,6 +31,7 @@ subdir('control')
 subdir('cpumond')
 subdir('lvm')
 subdir('vhd')
+subdir('qcow2')
 subdir('drivers')
 subdir('tapback')
 subdir('mockatests')

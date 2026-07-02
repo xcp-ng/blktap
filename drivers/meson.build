@@ -13,6 +13,8 @@ tapdisk_sources = [
   'tapdisk-vbd.c',
   'tapdisk-vbd.h',
   'linux-blktap.h',
+  'tapdisk-blktap.c',
+  'tapdisk-blktap.h',
   'tapdisk-protocol-new.h',
   'tapdisk-nbdserver.c',
   'tapdisk-nbdserver.h',
@@ -66,6 +68,7 @@ tapdisk_sources = [
   'block-llcache.c',
   'block-nbd.c',
   'block-log.c',
+  'block-qcow2.c',
 
   # shared ring
   'td-blkif.c',
@@ -83,6 +86,8 @@ aio_dep = compiler.find_library('aio')
 zlib_dep = dependency('zlib')
 evtchn_dep = dependency('xenevtchn')
 gnttab_dep = dependency('xengnttab')
+m_dep = compiler.find_library('m')
+dl_dep = compiler.find_library('dl')
 
 tapdisk_slib = static_library('tapdisk',
   tapdisk_sources,
@@ -92,9 +97,15 @@ tapdisk_slib = static_library('tapdisk',
     evtchn_dep,
     gnttab_dep,
     zlib_dep,
+    glib_dep,
+    m_dep,
+    dl_dep,
+    rt_dep,
+    pthread_dep,
   ],
   link_with : [
     vhd_libs.get_shared_lib(),
+    qcow2_libs.get_shared_lib(),
   ],
   c_args : [
     '-D_GNU_SOURCE',
