@@ -68,4 +68,17 @@
 # define check_expected_ptr(parameter) check_expected(parameter)
 #endif
 
+#ifndef assert_int_in_range
+# define assert_int_in_range(value, minimum, maximum) \
+	assert_in_range(value, minimum, maximum)
+#endif
+#ifndef will_return_int_always
+# define will_return_int_always(function, value) \
+	will_return_always(function, value)
+#endif
+#ifndef will_return_ptr_always
+# define will_return_ptr_always(function, value) \
+	will_return_always(function, value)
+#endif
+
 #endif /* __CMOCKA_COMPAT_H__ */

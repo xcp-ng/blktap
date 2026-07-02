@@ -31,6 +31,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 #include <wrappers.h>
 
@@ -121,10 +122,10 @@ void test_vhd_util_snapshot_einval_from_vhd_set_keyhash(void **state)
 {
 	will_return(__wrap_canonpath, "testing");
 	will_return(__wrap_vhd_snapshot, 0);
-	will_return_always(__wrap_vhd_open, 0);
+	will_return_int_always(__wrap_vhd_open, 0);
 	set_cookie();
 	will_return(__wrap_vhd_get_keyhash, 0);
-	will_return_always(__wrap_vhd_close, 0);
+	will_return_int_always(__wrap_vhd_close, 0);
 	will_return(__wrap_vhd_set_keyhash, EINVAL);
 	expect_any_count(__wrap_vhd_close, ctx, 2);
 	expect_any(__wrap_free, ptr);
