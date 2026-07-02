@@ -174,8 +174,8 @@ void test_tap_ctl_allocate_make_device_fail(void **state)
 	expect_string(__wrap_access, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_string(__wrap_unlink, pathname, "/dev/xen/blktap-2/control");
-	will_return(__wrap___xmknod, EPERM);
-	expect_string(__wrap___xmknod, pathname, "/dev/xen/blktap-2/control");
+	will_return(__wrap_mknod, EPERM);
+	expect_string(__wrap_mknod, pathname, "/dev/xen/blktap-2/control");
 	/* Close check environment */
 	will_return(__wrap_flock, 0);
 	expect_int_value(__wrap_flock, fd, fileno(proc_misc));
@@ -211,8 +211,8 @@ void test_tap_ctl_allocate_ring_create_fail(void **state)
 	expect_string(__wrap_access, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_string(__wrap_unlink, pathname, "/dev/xen/blktap-2/control");
-	will_return(__wrap___xmknod, 0);
-	expect_string(__wrap___xmknod, pathname, "/dev/xen/blktap-2/control");
+	will_return(__wrap_mknod, 0);
+	expect_string(__wrap_mknod, pathname, "/dev/xen/blktap-2/control");
 	/* Close check environment */
 	will_return(__wrap_flock, 0);
 	expect_int_value(__wrap_flock, fd, fileno(proc_misc));
@@ -236,8 +236,8 @@ void test_tap_ctl_allocate_ring_create_fail(void **state)
 	expect_string(__wrap_mkdir, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_any(__wrap_unlink, pathname);
-	will_return(__wrap___xmknod, EPERM);
-	expect_any(__wrap___xmknod, pathname);
+	will_return(__wrap_mknod, EPERM);
+	expect_any(__wrap_mknod, pathname);
 	/* tap-ctl-free */
 	will_return(__wrap_open, dev_fd);
 	expect_string(__wrap_open, pathname, "/dev/xen/blktap-2/control");
@@ -277,8 +277,8 @@ void test_tap_ctl_allocate_io_device_fail(void **state)
 	expect_string(__wrap_access, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_string(__wrap_unlink, pathname, "/dev/xen/blktap-2/control");
-	will_return(__wrap___xmknod, 0);
-	expect_string(__wrap___xmknod, pathname, "/dev/xen/blktap-2/control");
+	will_return(__wrap_mknod, 0);
+	expect_string(__wrap_mknod, pathname, "/dev/xen/blktap-2/control");
 	/* Close check environment */
 	will_return(__wrap_flock, 0);
 	expect_int_value(__wrap_flock, fd, fileno(proc_misc));
@@ -302,8 +302,8 @@ void test_tap_ctl_allocate_io_device_fail(void **state)
 	expect_string(__wrap_mkdir, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_any(__wrap_unlink, pathname);
-	will_return(__wrap___xmknod, 0);
-	expect_any(__wrap___xmknod, pathname);
+	will_return(__wrap_mknod, 0);
+	expect_any(__wrap_mknod, pathname);
 
 	/* Make Device - io device */
 	will_return(__wrap_access, ENOENT);
@@ -316,8 +316,8 @@ void test_tap_ctl_allocate_io_device_fail(void **state)
 	expect_string(__wrap_mkdir, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_any(__wrap_unlink, pathname);
-	will_return(__wrap___xmknod, EPERM);
-	expect_any(__wrap___xmknod, pathname);
+	will_return(__wrap_mknod, EPERM);
+	expect_any(__wrap_mknod, pathname);
 
 	/* tap-ctl-free */
 	will_return(__wrap_open, dev_fd);
@@ -358,8 +358,8 @@ void test_tap_ctl_allocate_success(void **state)
 	expect_string(__wrap_access, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_string(__wrap_unlink, pathname, "/dev/xen/blktap-2/control");
-	will_return(__wrap___xmknod, 0);
-	expect_string(__wrap___xmknod, pathname, "/dev/xen/blktap-2/control");
+	will_return(__wrap_mknod, 0);
+	expect_string(__wrap_mknod, pathname, "/dev/xen/blktap-2/control");
 	/* Close check environment */
 	will_return(__wrap_flock, 0);
 	expect_int_value(__wrap_flock, fd, fileno(proc_misc));
@@ -383,8 +383,8 @@ void test_tap_ctl_allocate_success(void **state)
 	expect_string(__wrap_mkdir, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_any(__wrap_unlink, pathname);
-	will_return(__wrap___xmknod, 0);
-	expect_any(__wrap___xmknod, pathname);
+	will_return(__wrap_mknod, 0);
+	expect_any(__wrap_mknod, pathname);
 
 	/* Make Device - io device */
 	will_return(__wrap_access, ENOENT);
@@ -397,8 +397,8 @@ void test_tap_ctl_allocate_success(void **state)
 	expect_string(__wrap_mkdir, pathname, "/dev/xen/blktap-2");
 	will_return(__wrap_unlink, 0);
 	expect_any(__wrap_unlink, pathname);
-	will_return(__wrap___xmknod, 0);
-	expect_any(__wrap___xmknod, pathname);
+	will_return(__wrap_mknod, 0);
+	expect_any(__wrap_mknod, pathname);
 
 
 	result = tap_ctl_allocate(&minor, &devname);
