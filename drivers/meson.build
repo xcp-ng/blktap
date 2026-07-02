@@ -88,6 +88,7 @@ evtchn_dep = dependency('xenevtchn')
 gnttab_dep = dependency('xengnttab')
 m_dep = compiler.find_library('m')
 dl_dep = compiler.find_library('dl')
+rt_dep = compiler.find_library('rt')
 
 tapdisk_slib = static_library('tapdisk',
   tapdisk_sources,

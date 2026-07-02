@@ -10,9 +10,14 @@ cpumond_sources = [
 # 'cpumond.service',
 #SYSTEMD_SERVICE_DIR = /usr/lib/systemd/system
 
+compiler = meson.get_compiler('c')
+rt_dep = compiler.find_library('rt')
+
 executable('cpumond', cpumond_sources,
-  link_with : blktapctl_libs.get_static_lib(),
   include_directories : incdir,
+  dependencies : [
+    rt_dep,
+  ],
   c_args : [
     '-D_GNU_SOURCE',
   ],

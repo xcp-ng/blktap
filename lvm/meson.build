@@ -4,7 +4,7 @@ lvmutil_sources = 'lvm-util.c'
 
 lvmutil_slib = static_library(
   'lvmutil', lvmutil_sources,
-  cpp_args : [
+  c_args : [
     '-D_GNU_SOURCE',
   ],
 )

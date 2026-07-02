@@ -20,11 +20,13 @@ blktapctl_sources = [
     'tap-ctl-commit.c',
     ]
 
+libexecdir = get_option('prefix') / get_option('libexecdir')
+
 c_flags = [
   '-D_GNU_SOURCE',
   '-DTAPCTL',
   '-DTAPDISK_EXEC="tapdisk"',
-  '-DTAPDISK_EXECDIR="../drivers"',
+  '-DTAPDISK_EXECDIR="@0@"'.format(libexecdir),
 ]
 
 blktapctl_libs = both_libraries('blktapctl',

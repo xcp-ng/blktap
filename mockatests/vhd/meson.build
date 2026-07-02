@@ -33,7 +33,7 @@ test_vhd_util = executable('test-vhd-util', test_vhd_util_sources,
     '-Wl,--wrap=vhd_open',
     '-Wl,--wrap=vhd_get_keyhash',
     '-Wl,--wrap=vhd_set_keyhash',
-    #'-Wl,--wrap=close',
+    '-Wl,--wrap=vhd_close',
     '-Wl,--wrap=get_current_dir_name,--wrap=realpath',
   ],
   override_options : [
