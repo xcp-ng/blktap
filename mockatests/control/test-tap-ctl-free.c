@@ -32,6 +32,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 
 #include <wrappers.h>
@@ -63,11 +64,11 @@ void test_tap_ctl_free_success(void **state)
 	expect_string(__wrap_open, pathname, "/dev/xen/blktap-2/control");
 
 	will_return(__wrap_ioctl, 0);
-	expect_value(__wrap_ioctl, fd, dev_fd);
-	expect_value(__wrap_ioctl, request, BLKTAP2_IOCTL_FREE_TAP);
+	expect_int_value(__wrap_ioctl, fd, dev_fd);
+	expect_int_value(__wrap_ioctl, request, BLKTAP2_IOCTL_FREE_TAP);
 
 	will_return(__wrap_close, 0);
-	expect_value(__wrap_close, fd, dev_fd);
+	expect_int_value(__wrap_close, fd, dev_fd);
 
 	result = tap_ctl_free(0);
 
@@ -83,11 +84,11 @@ void test_tap_ctl_free_ioctl_busy(void **state)
 	expect_string(__wrap_open, pathname, "/dev/xen/blktap-2/control");
 
 	will_return(__wrap_ioctl, EBUSY);
-	expect_value(__wrap_ioctl, fd, dev_fd);
-	expect_value(__wrap_ioctl, request, BLKTAP2_IOCTL_FREE_TAP);
+	expect_int_value(__wrap_ioctl, fd, dev_fd);
+	expect_int_value(__wrap_ioctl, request, BLKTAP2_IOCTL_FREE_TAP);
 
 	will_return(__wrap_close, 0);
-	expect_value(__wrap_close, fd, dev_fd);
+	expect_int_value(__wrap_close, fd, dev_fd);
 
 	result = tap_ctl_free(0);
 

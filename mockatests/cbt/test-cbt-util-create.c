@@ -32,6 +32,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 
 #include <cbt-util-priv.h>
@@ -51,7 +52,7 @@ void test_cbt_util_create_success(void **state)
 	FILE *test_log = fmemopen(log_meta, file_size, "w+");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	result = cbt_util_create(5, args);
 
@@ -86,7 +87,7 @@ void test_cbt_util_create_metadata_write_failure(void **state)
 	setbuf(test_log, NULL);
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	result = cbt_util_create(5, args);
 
@@ -107,7 +108,7 @@ void test_cbt_util_create_bitmap_write_failure(void **state)
 	setbuf(test_log, NULL);
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	result = cbt_util_create(5, args);
 
