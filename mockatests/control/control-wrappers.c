@@ -248,10 +248,24 @@ __wrap_flock(int fd, int operation)
 	return result;
 }
 
+/*
+ * Prior to glibc 2.33, mknod(3) was an inline wrapper in <sys/stat.h>
+ * that forwarded to the exported __xmknod() symbol.
+ * Since glibc 2.33, mknod() is exported directly so we have to wrap
+ * mknod() instead.
+ *
+ * Compiler flags (-fno-inline, -Og) and glibc version both influence
+ * which symbol the call site actually references, so we define both
+ * wrappers unconditionally.
+ */
 int
-__wrap___xmknod(int ver, const char *pathname, mode_t mode, dev_t * dev)
+__wrap_mknod(const char *pathname, mode_t mode, dev_t dev)
 {
 	int result;
+
+	(void)mode;
+	(void)dev;
+
 	check_expected_ptr(pathname);
 	result = mock();
 	if (result != 0)
@@ -260,6 +274,16 @@ __wrap___xmknod(int ver, const char *pathname, mode_t mode, dev_t * dev)
 		result = -1;
 	}
 	return result;
+}
+
+int
+__wrap___xmknod(int ver, const char *pathname, mode_t mode, dev_t *dev)
+{
+	(void)ver;
+	(void)mode;
+	(void)dev;
+
+	return __wrap_mknod(pathname, mode, (dev_t)(dev ? *dev : 0));
 }
 
 int
