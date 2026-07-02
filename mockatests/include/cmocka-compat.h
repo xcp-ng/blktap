@@ -58,4 +58,14 @@
 	expect_value_count(function, parameter, value, count)
 #endif
 
+#ifndef check_expected_int
+# define check_expected_int(parameter) check_expected(parameter)
+#endif
+#ifndef check_expected_uint
+# define check_expected_uint(parameter) check_expected(parameter)
+#endif
+#ifndef check_expected_ptr
+# define check_expected_ptr(parameter) check_expected(parameter)
+#endif
+
 #endif /* __CMOCKA_COMPAT_H__ */
