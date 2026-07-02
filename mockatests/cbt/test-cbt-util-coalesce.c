@@ -34,6 +34,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 
 #include <cbt-util-priv.h>
@@ -102,7 +103,7 @@ void test_cbt_util_coalesce_no_child_file_failure(void **state)
 								sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 
 	will_return(__wrap_fopen, NULL);
 
@@ -123,7 +124,7 @@ void test_cbt_util_coalesce_parent_log_malloc_failure(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, 1, "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	malloc_succeeds(false);
 
@@ -150,10 +151,10 @@ void test_cbt_util_coalesce_child_log_malloc_failure(void **state)
 								sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	malloc_succeeds(true);
 	malloc_succeeds(false);
@@ -178,7 +179,7 @@ void test_cbt_util_coalesce_no_parent_meta_failure(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, 1, "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	result = cbt_util_coalesce(6, args);
 	assert_int_equal(result, -EIO);
@@ -200,9 +201,9 @@ void test_cbt_util_coalesce_no_child_meta_failure(void **state)
 	FILE *child_log = fmemopen((void*)child_meta, 1, "r");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	result = cbt_util_coalesce(6, args);
 	assert_int_equal(result, -EIO);
@@ -232,9 +233,9 @@ void test_cbt_util_coalesce_larger_parent_bitmap_failure(void **state)
 								sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	result = cbt_util_coalesce(6, args);
 	assert_int_equal(result, -EINVAL);
@@ -259,9 +260,9 @@ void test_cbt_util_coalesce_parent_bitmap_malloc_failure(void **state)
 	FILE *child_log = fmemopen((void*)log_meta, file_size, "r+");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	malloc_succeeds(true);
 	malloc_succeeds(true);
@@ -292,9 +293,9 @@ void test_cbt_util_coalesce_child_bitmap_malloc_failure(void **state)
 	FILE *child_log = fmemopen((void*)log_meta, file_size, "r+");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	malloc_succeeds(true);
 	malloc_succeeds(true);
@@ -326,9 +327,9 @@ void test_cbt_util_coalesce_parent_no_bitmap_data_failure(void **state)
 							sizeof(struct cbt_log_metadata), "r+");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	result = cbt_util_coalesce(6, args);
 	assert_int_equal(result, -EIO);
@@ -360,9 +361,9 @@ void test_cbt_util_coalesce_child_no_bitmap_data_failure(void **state)
 							sizeof(struct cbt_log_metadata), "r+");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	result = cbt_util_coalesce(6, args);
 	assert_int_equal(result, -EIO);
@@ -402,9 +403,9 @@ void test_cbt_util_coalesce_success(void **state)
 	FILE *child_log = fmemopen((void*)child_data, file_size, "r");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 	enable_mock_fwrite();
 	output = setup_fwrite_mock(bmsize);
 
@@ -451,9 +452,9 @@ void test_cbt_util_coalesce_set_file_pointer_failure(void **state)
 	FILE *child_log = fmemopen((void*)child_data, file_size, "r+");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	fail_fseek(EIO);
 
@@ -494,9 +495,9 @@ void test_cbt_util_coalesce_write_bitmap_failure(void **state)
 	FILE *child_log = fmemopen((void*)child_data, file_size, "r");
 
 	will_return(__wrap_fopen, parent_log);
-	expect_value(__wrap_fclose, fp, parent_log);
+	expect_ptr_value(__wrap_fclose, fp, parent_log);
 	will_return(__wrap_fopen, child_log);
-	expect_value(__wrap_fclose, fp, child_log);
+	expect_ptr_value(__wrap_fclose, fp, child_log);
 
 	result = cbt_util_coalesce(6, args);
 	assert_int_equal(result, -EIO);

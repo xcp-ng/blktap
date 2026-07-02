@@ -34,6 +34,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 #include <uuid/uuid.h>
 
@@ -54,7 +55,7 @@ void test_cbt_util_get_flag(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	output = setup_vprintf_mock(1024);
 
@@ -83,7 +84,7 @@ void test_cbt_util_get_parent(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	output = setup_vprintf_mock(1024);
 
@@ -115,7 +116,7 @@ void test_cbt_util_get_child(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	output = setup_vprintf_mock(1024);
 
@@ -143,7 +144,7 @@ void test_cbt_util_get_size(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	output = setup_vprintf_mock(1024);
 
@@ -175,7 +176,7 @@ void test_cbt_util_get_bitmap(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, file_size, "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 	enable_mock_fwrite();
 	output = setup_fwrite_mock(bmsize);
 
@@ -201,7 +202,7 @@ void test_cbt_util_get_bitmap_nodata_failure(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, sizeof(struct cbt_log_metadata), "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	result = cbt_util_get(5, args);
 	assert_int_equal(result, -EIO);
@@ -222,7 +223,7 @@ void test_cbt_util_get_bitmap_malloc_failure(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, file_size, "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	malloc_succeeds(true);
 	malloc_succeeds(false);
@@ -268,7 +269,7 @@ void test_cbt_util_get_nodata_failure(void **state)
 	FILE *test_log = fmemopen((void*)log_meta, 1, "r");
 
 	will_return(__wrap_fopen, test_log);
-	expect_value(__wrap_fclose, fp, test_log);
+	expect_ptr_value(__wrap_fclose, fp, test_log);
 
 	result = cbt_util_get(4, args);
 
