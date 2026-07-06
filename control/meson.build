@@ -32,7 +32,11 @@ c_flags = [
 blktapctl_libs = both_libraries('blktapctl',
   blktapctl_sources,
   include_directories : incdir,
-  c_args : c_flags,
+  # Keep open()/fopen()/etc. compiling down to the plain (non-64) glibc
+  # symbols, so the mockatests linker --wrap=open,--wrap=fopen,... flags
+  # still intercept them. No functional difference on 64-bit Linux, where
+  # off_t is already 64-bit.
+  c_args : c_flags + ['-U_FILE_OFFSET_BITS'],
   version : '0.1.1',
   override_options : [
     'debug=true',
