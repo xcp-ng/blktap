@@ -569,7 +569,6 @@ static void lowmem_timeout(event_id_t id, char mode, void *data)
 		ERR(-ret, "Failed to re-init low memory handler: %s\n",
 		    strerror(-ret));
 		lowmem_cleanup();
-		return;
 	}
 }
 
@@ -769,6 +768,9 @@ tapdisk_server_init(void)
 	memset(&server, 0, sizeof(server));
 	INIT_LIST_HEAD(&server.vbds);
 
+	server.tlog_reopen_evid = -1;
+	server.signal_handler_evid = -1;
+
 	scheduler_initialize(&server.scheduler);
 
 	if ((ret = tapdisk_server_initialize_lowmem_mode()) < 0) {
@@ -779,17 +781,14 @@ tapdisk_server_init(void)
 	}
 
 	if ((ret = tapdisk_server_initialize_cpumond_client()) < 0) {
-		EPRINTF("Failed to connect to cpumond: %s\n",
+		EPRINTF("Failed to connect to cpumond: %s (continuing without it)\n",
 			strerror(-ret));
 		cpumond_cleanup();
-		goto out;
+		ret = 0;  /* non-fatal: runnning without cpumond is ok */
 	}
 
 out:
-	server.tlog_reopen_evid = -1;
-	server.signal_handler_evid = -1;
-
-	return 0;
+	return ret;
 }
 
 int
@@ -822,7 +821,10 @@ tapdisk_server_initialize(const char *read, const char *write)
 {
 	int err;
 
-	tapdisk_server_init();
+
+	err = tapdisk_server_init();
+	if (err)
+		goto fail;
 
 	err = tapdisk_server_complete();
 	if (err)
