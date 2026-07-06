@@ -468,21 +468,20 @@ tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 {
 	int _err;
 	long long *max = NULL, *sum = NULL, *cnt = NULL;
-	static _Atomic int depth = 0;
 	bool processing_barrier_message;
 	bool blkif_destroyed = false;
 	uint64_t *ticks = NULL;
 
 	ASSERT(queue);
 	ASSERT(req);
-	ASSERT(depth >= 0);
 
 	struct td_xenblkif * const blkif = queue->blkif;
 	ASSERT(blkif);
 
 	if (lock)
 		pthread_mutex_lock(&queue->mutex);
-	depth++;
+	ASSERT(queue->complete_depth >= 0);
+	queue->complete_depth++;
 
 	processing_barrier_message =
 		req->msg.operation == BLKIF_OP_WRITE_BARRIER;
@@ -587,9 +586,10 @@ tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 			blkif_destroyed = tapdisk_xenblkif_complete_request(queue,
 					msg_to_tapreq(queue->barrier.msg), 0, 1, false);
 			/*
-			 * We assert here on "blkif_destroyed == true" because as
-			 * "depth > 1" in the recursive call above, the branch to
-			 * destroy the ring shouldn't be taken.
+			 * blkif_destroyed must be false here: the recursive call
+			 * above runs with queue->complete_depth > 1, so it cannot
+			 * take the ring-destruction branch. It must not, since we
+			 * still dereference queue and blkif below.
 			 */
 			ASSERT(!blkif_destroyed);
 		}
@@ -598,11 +598,17 @@ tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 	/*
 	 * Last request of a dead ring completes, destroy the ring.
 	 */
-	if (unlikely(1 == depth
+	if (unlikely(1 == queue->complete_depth
 		&& blkif->dead
 		&& !tapdisk_xenblkif_reqs_pending(queue))) {
 
 		RING_DEBUG(blkif, "destroying dead ring\n");
+		queue->complete_depth--;
+		/*
+		 * Unlock before destroy: tapdisk_xenblkif_destroy() frees the
+		 * blkif and its queues (mutex included), so don't touch the
+		 * queue past this point.
+		 */
 		pthread_mutex_unlock(&queue->mutex);
 		tapdisk_xenblkif_destroy(blkif);
 		blkif_destroyed = true;
@@ -610,9 +616,11 @@ tapdisk_xenblkif_complete_request(struct td_blkif_queue * const queue,
 	}
 
 out:
-	depth--;
-	if (lock)
-		pthread_mutex_unlock(&queue->mutex);
+	if (!blkif_destroyed) {
+		queue->complete_depth--;
+		if (lock)
+			pthread_mutex_unlock(&queue->mutex);
+	}
 	return blkif_destroyed;
 }
 

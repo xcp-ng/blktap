@@ -106,6 +106,8 @@ struct td_xenblkif {
          */
         pthread_mutex_t mutex;
 
+        int complete_depth;
+
         /**
          * Stack pointer to the aforementioned stack.
          */

@@ -578,6 +578,7 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
         queue->chkrng_event = -1;
         queue->stoppolling_event = -1;
         queue->in_polling = false;
+        queue->complete_depth = 0;
 
         queue->barrier.msg = NULL;
         queue->barrier.io_done = false;
