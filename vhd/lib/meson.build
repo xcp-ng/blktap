@@ -50,4 +50,5 @@ vhd_libs = both_libraries(
     '-D_GNU_SOURCE',
   ],
   version : '0.1.1',
+  install : true,
 )

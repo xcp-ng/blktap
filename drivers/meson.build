@@ -130,6 +130,7 @@ blockcrypto_libs = shared_library('blockcrypto',
   ],
   dependencies : crypto_dep,
   version : '0.0.0',
+  install : true,
   override_options : [
     'b_lundef=false',
   ],
@@ -146,6 +147,8 @@ executable('tapdisk', tapdisk_sources,
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
+  install_dir : get_option('libexecdir'),
 )
 
 tapdisk_stream_sources = 'tapdisk-stream.c'
@@ -172,6 +175,8 @@ executable('td-util', td_util_sources,
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
+  install_dir : get_option('sbindir'),
 )
 
 td_rated_sources = 'td-rated.c'
@@ -182,4 +187,24 @@ executable('td-rated', td_rated_sources,
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
+  install_dir : get_option('sbindir'),
+)
+
+install_data('blktap', install_dir : get_option('sysconfdir') / 'logrotate.d')
+
+install_data(
+  'tapdisk-logs.xml',
+  install_dir : get_option('sysconfdir') / 'xensource' / 'bugtool',
+)
+
+install_data(
+  'tapdisk-logs/description.xml',
+  install_dir : get_option('sysconfdir') / 'xensource' / 'bugtool' / 'tapdisk-logs',
+)
+
+install_data(
+  'prune_tapdisk_logs',
+  install_dir : get_option('sysconfdir') / 'cron.daily',
+  install_mode : 'rwxr-xr-x',
 )

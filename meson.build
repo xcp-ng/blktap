@@ -25,6 +25,13 @@ incdir = include_directories('.', 'include')
 
 uuid_dep = dependency('uuid')
 
+systemd_dep = dependency('systemd', required : false)
+if systemd_dep.found()
+  systemd_unit_dir = systemd_dep.get_variable(pkgconfig : 'systemdsystemunitdir')
+else
+  systemd_unit_dir = '/usr/lib/systemd/system'
+endif
+
 subdir('cbt')
 subdir('control')
 subdir('cpumond')
@@ -35,29 +42,32 @@ subdir('drivers')
 subdir('tapback')
 subdir('mockatests')
 
-#doc = README README.md LICENSE CONTRIB MAINTAINERS
+#TODO: uuid dep in drivers, debug, tests
 
-#TODO: uuid dep in drivers, debug, tests, install
+install_data(
+  ['README', 'README.md', 'LICENSE', 'CONTRIB', 'MAINTAINERS'],
+  install_dir : get_option('datadir') / 'doc' / meson.project_name(),
+)
 
-# install_headers(
-#   'include/vhd.h',
-#   'include/libvhd.h',
-#   'include/libvhd-index.h',
-#   'include/libvhd-journal.h',
-#   'include/vhd-util.h',
-#   'include/list.h',
-#   subdir : 'vhd',
-# )
-#
-# install_headers(
-#   'include/blktap2.h',
-#   'include/blktaplib.h',
-#   'include/blktap3.h',
-#   'include/xen_blkif.h',
-#   'include/tapdisk-message.h',
-#   'include/tap-ctl.h',
-#   'include/debug.h',
-#   'include/util.h',
-#   'drivers/tapdisk-metrics-stats.h',
-#   subdir : 'blktap',
-# )
+install_headers(
+  'include/vhd.h',
+  'include/libvhd.h',
+  'include/libvhd-index.h',
+  'include/libvhd-journal.h',
+  'include/vhd-util.h',
+  'include/list.h',
+  subdir : 'vhd',
+)
+
+install_headers(
+  'include/blktap2.h',
+  'include/blktaplib.h',
+  'include/blktap3.h',
+  'include/xen_blkif.h',
+  'include/tapdisk-message.h',
+  'include/tap-ctl.h',
+  'include/debug.h',
+  'include/util.h',
+  'drivers/tapdisk-metrics-stats.h',
+  subdir : 'blktap',
+)

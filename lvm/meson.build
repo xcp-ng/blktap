@@ -16,4 +16,6 @@ executable('lvm-util', lvm_util_sources,
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
+  install_dir : get_option('sbindir'),
 )

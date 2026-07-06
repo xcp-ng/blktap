@@ -18,6 +18,7 @@ executable('qemu-img', qemu_img_sources,
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
   override_options : [
     'werror=false',
   ],

@@ -156,6 +156,7 @@ qcow2_libs = both_libraries('qcow2',
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
   # Vendored QEMU sources: don't enforce this project's -Werror on them.
   override_options : [
     'werror=false',

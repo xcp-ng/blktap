@@ -13,6 +13,7 @@ executable('vhd-util', vhd_util_sources,
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
 )
 
 vhd_index_sources = [
@@ -28,4 +29,5 @@ executable('vhd-index', vhd_index_sources,
   c_args : [
     '-D_GNU_SOURCE',
   ],
+  install : true,
 )

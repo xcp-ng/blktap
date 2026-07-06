@@ -38,6 +38,7 @@ blktapctl_libs = both_libraries('blktapctl',
   # off_t is already 64-bit.
   c_args : c_flags + ['-U_FILE_OFFSET_BITS'],
   version : '0.1.1',
+  install : true,
   override_options : [
     'debug=true',
   ],
@@ -49,6 +50,8 @@ executable('tap-ctl', tap_ctl_sources,
   link_with : blktapctl_libs.get_shared_lib(),
   include_directories : incdir,
   c_args : c_flags,
+  install : true,
+  install_dir : get_option('sbindir'),
   override_options : [
     'debug=true',
   ],

@@ -16,4 +16,6 @@ cbt_util_sources = 'main.c'
 executable('cbt-util', cbt_util_sources,
   dependencies : uuid_dep,
   link_with : cbtutil_slib,
+  install : true,
+  install_dir : get_option('sbindir'),
 )
