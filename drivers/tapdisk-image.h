@@ -32,6 +32,7 @@
 #define _TAPDISK_IMAGE_H_
 
 #include "tapdisk.h"
+#include "tapdisk-err.h"
 
 struct td_image_handle {
 	int                          type;
@@ -79,7 +80,7 @@ struct td_image_handle {
 int tapdisk_image_open(int, const char *, int, struct td_vbd_encryption *, td_image_t **);
 void tapdisk_image_close(td_image_t *);
 
-int tapdisk_image_open_chain(const char *, int, int, struct td_vbd_encryption *, struct list_head *);
+int tapdisk_image_open_chain(const char *, int, int, struct td_vbd_encryption *, struct list_head *, td_err *);
 void tapdisk_image_close_chain(struct list_head *);
 int tapdisk_image_validate_chain(struct list_head *);
 

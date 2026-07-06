@@ -16,6 +16,7 @@ blktap_HEADERS += blktap3.h
 blktap_HEADERS += xen_blkif.h
 blktap_HEADERS += tapdisk-message.h
 blktap_HEADERS += tap-ctl.h
+blktap_HEADERS += tapdisk-err.h
 blktap_HEADERS += debug.h
 blktap_HEADERS += util.h
 blktap_HEADERS += ../drivers/tapdisk-metrics-stats.h

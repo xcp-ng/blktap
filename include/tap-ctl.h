@@ -34,6 +34,7 @@
 #include <syslog.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <tapdisk-err.h>
 #include <tapdisk-message.h>
 #include <list.h>
 
@@ -136,7 +137,7 @@ int tap_ctl_pause(const int id, const int minor, struct timeval *timeout);
  * Unpauses the VBD
  */
 int tap_ctl_unpause(const int id, const int minor, const char *params,
-		int flags, char *secondary, const char *logpath);
+		int flags, char *secondary, const char *logpath, td_err *error);
 
 ssize_t tap_ctl_stats(pid_t pid, int minor, char *buf, size_t size);
 int tap_ctl_stats_fwrite(pid_t pid, int minor, FILE *out);
