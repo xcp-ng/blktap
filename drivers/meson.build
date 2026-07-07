@@ -81,14 +81,10 @@ tapdisk_sources = [
   'td-stats.h',
   ]
 
-compiler = meson.get_compiler('c')
-aio_dep = compiler.find_library('aio')
 zlib_dep = dependency('zlib')
 evtchn_dep = dependency('xenevtchn')
 gnttab_dep = dependency('xengnttab')
 m_dep = compiler.find_library('m')
-dl_dep = compiler.find_library('dl')
-rt_dep = compiler.find_library('rt')
 
 tapdisk_slib = static_library('tapdisk',
   tapdisk_sources,
@@ -108,9 +104,6 @@ tapdisk_slib = static_library('tapdisk',
     vhd_libs.get_shared_lib(),
     qcow2_libs.get_shared_lib(),
   ],
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
 )
 
 blockcrypto_sources = [
@@ -125,9 +118,6 @@ crypto_dep = dependency('libcrypto')
 blockcrypto_libs = shared_library('blockcrypto',
   blockcrypto_sources,
   include_directories : incdir,
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
   dependencies : crypto_dep,
   version : '0.0.0',
   install : true,
@@ -144,9 +134,6 @@ executable('tapdisk', tapdisk_sources,
   dependencies : [
     uuid_dep,
   ],
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
   install : true,
   install_dir : get_option('libexecdir'),
 )
@@ -159,9 +146,6 @@ executable('tapdisk-stream', tapdisk_stream_sources,
   dependencies : [
     uuid_dep,
   ],
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
 )
 
 td_util_sources = 'td.c'
@@ -172,9 +156,6 @@ executable('td-util', td_util_sources,
   dependencies : [
     uuid_dep,
   ],
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
   install : true,
   install_dir : get_option('sbindir'),
 )
@@ -184,9 +165,6 @@ td_rated_sources = 'td-rated.c'
 executable('td-rated', td_rated_sources,
   link_with : tapdisk_slib,
   include_directories : incdir,
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
   install : true,
   install_dir : get_option('sbindir'),
 )

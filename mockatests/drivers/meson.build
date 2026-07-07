@@ -39,9 +39,6 @@ test_drivers = executable('test-drivers', test_drivers_sources,
     '-Wl,--wrap=tapdisk_server_register_event',
     '-Wl,--wrap=gettimeofday',
   ],
-  override_options : [
-    'debug=true',
-    'optimization=g',
-  ],
+  override_options : mocka_override_options,
 )
 test('test_drivers', test_drivers)

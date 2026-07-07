@@ -127,9 +127,6 @@ qcow2_sources = [
   'util/yank.c',
   ]
 
-compiler = meson.get_compiler('c')
-aio_dep = compiler.find_library('aio')
-dl_dep = compiler.find_library('dl')
 pthread_dep = dependency('threads')
 glib_dep = dependency('glib-2.0')
 zlib_dep = dependency('zlib')
@@ -153,9 +150,6 @@ qcow2_libs = both_libraries('qcow2',
   ],
   link_with : lvmutil_slib,
   version : '1.1.1',
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
   install : true,
   # Vendored QEMU sources: don't enforce this project's -Werror on them.
   override_options : [

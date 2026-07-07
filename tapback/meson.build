@@ -15,9 +15,6 @@ executable('tapback', tapback_sources,
   link_with : [
     blktapctl_libs.get_shared_lib(),
   ],
-  c_args : [
-    '-D_GNU_SOURCE', # required by vasprintf
-  ],
   install : true,
   override_options : 'warning_level=2',
 )

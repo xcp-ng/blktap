@@ -14,8 +14,5 @@ wrappers_slib = static_library(
   c_args : [
     '-fno-inline',
   ],
-  override_options : [
-    'debug=true',
-    'optimization=g',
-  ],
+  override_options : mocka_override_options,
 )

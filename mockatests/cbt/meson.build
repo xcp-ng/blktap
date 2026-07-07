@@ -36,9 +36,6 @@ test_cbt_util = executable('test-cbt-util', test_cbt_util_sources,
     '-Wl,--wrap=fwrite',
     '-Wl,--wrap=fseek',
   ],
-  override_options : [
-    'debug=true',
-    'optimization=g',
-  ],
+  override_options : mocka_override_options,
 )
 test('test_cbt_util', test_cbt_util)

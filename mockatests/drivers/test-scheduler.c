@@ -28,7 +28,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define _GNU_SOURCE /* Needed for F_GETPIPE_SZ */
+/* _GNU_SOURCE (set project-wide) is needed here for F_GETPIPE_SZ. */
 
 #include <setjmp.h>
 #include <stdarg.h>

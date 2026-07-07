@@ -23,7 +23,6 @@ blktapctl_sources = [
 libexecdir = get_option('prefix') / get_option('libexecdir')
 
 c_flags = [
-  '-D_GNU_SOURCE',
   '-DTAPCTL',
   '-DTAPDISK_EXEC="tapdisk"',
   '-DTAPDISK_EXECDIR="@0@"'.format(libexecdir),

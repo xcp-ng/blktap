@@ -35,9 +35,6 @@ test_control = executable('test-control', test_control_sources,
     '-Wl,--wrap=glob,--wrap=globfree',
     '-Wl,--wrap=fopen,--wrap=fclose,--wrap=fseek,--wrap=fwrite',
   ],
-  override_options : [
-    'debug=true',
-    'optimization=g',
-  ],
+  override_options : mocka_override_options,
 )
 test('test_control', test_control)

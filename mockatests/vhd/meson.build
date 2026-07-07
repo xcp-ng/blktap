@@ -14,7 +14,6 @@ test_vhd_util = executable('test-vhd-util', test_vhd_util_sources,
     mockatests_include,
   ],
   c_args : [
-    '-D_GNU_SOURCE',
     '-Doff64_t=__off64_t',
     '-fno-inline-functions',
   ] + c_args_tests,
@@ -36,9 +35,6 @@ test_vhd_util = executable('test-vhd-util', test_vhd_util_sources,
     '-Wl,--wrap=vhd_close',
     '-Wl,--wrap=get_current_dir_name,--wrap=realpath',
   ],
-  override_options : [
-    'debug=true',
-    'optimization=g',
-  ],
+  override_options : mocka_override_options,
 )
 test('test_vhd_util', test_vhd_util)

@@ -7,16 +7,10 @@ cpumond_sources = [
     'cpumond.h',
     ]
 
-compiler = meson.get_compiler('c')
-rt_dep = compiler.find_library('rt')
-
 executable('cpumond', cpumond_sources,
   include_directories : incdir,
   dependencies : [
     rt_dep,
-  ],
-  c_args : [
-    '-D_GNU_SOURCE',
   ],
   install : true,
 )

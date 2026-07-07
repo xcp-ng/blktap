@@ -31,9 +31,6 @@ vhd_sources = [
   'xattr.h',
   ]
 
-compiler = meson.get_compiler('c')
-dl_dep = compiler.find_library('dl')
-
 vhd_libs = both_libraries(
   'vhd',
   vhd_sources,
@@ -46,9 +43,6 @@ vhd_libs = both_libraries(
     dl_dep,
   ],
   link_with : lvmutil_slib,
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
   version : '0.1.1',
   install : true,
 )

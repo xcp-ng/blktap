@@ -10,9 +10,6 @@ executable('vhd-util', vhd_util_sources,
   link_with : [
     vhd_libs.get_static_lib(),
   ],
-  c_args : [
-    '-D_GNU_SOURCE',
-  ],
   install : true,
 )
 
@@ -25,9 +22,6 @@ executable('vhd-index', vhd_index_sources,
   dependencies : uuid_dep,
   link_with : [
     vhd_libs.get_static_lib(),
-  ],
-  c_args : [
-    '-D_GNU_SOURCE',
   ],
   install : true,
 )

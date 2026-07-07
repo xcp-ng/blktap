@@ -23,7 +23,17 @@ configure_file(output : 'config.h', configuration : conf_data)
 
 incdir = include_directories('.', 'include')
 
+# Required by vasprintf(). Historically cbt-util was built without it
+# (autotools never set it there), but it doesn't use any GNU-specific
+# symbol, so applying it project-wide is a no-op for it in practice.
+add_project_arguments('-D_GNU_SOURCE', language : 'c')
+
 uuid_dep = dependency('uuid')
+
+compiler = meson.get_compiler('c')
+aio_dep = compiler.find_library('aio')
+dl_dep = compiler.find_library('dl')
+rt_dep = compiler.find_library('rt')
 
 systemd_dep = dependency('systemd', required : false)
 if systemd_dep.found()
