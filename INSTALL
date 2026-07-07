@@ -1,1 +1,66 @@
-Currently building this package outside of the XenServer build environment is somewhat broken. The goal is to replace it with a simple "make"/"make install" process.
+Building
+========
+
+This package uses the meson build system.
+
+    meson setup build
+    meson compile -C build
+
+Installing
+==========
+
+    meson install -C build
+
+This installs, matching the old autotools layout:
+
+- binaries: cbt-util, tap-ctl, lvm-util, td-util, td-rated to sbindir;
+  vhd-util, vhd-index, qemu-img, cpumond, tapback to bindir; tapdisk to
+  libexecdir
+- libraries: libblktapctl, libvhd, libqcow2, libblockcrypto to libdir
+- headers: include/{vhd.h,libvhd*.h,vhd-util.h,list.h} to
+  includedir/vhd, and the blktap headers to includedir/blktap
+- doc files (README, README.md, LICENSE, CONTRIB, MAINTAINERS) to
+  datadir/doc/tapdisk
+- drivers/blktap to sysconfdir/logrotate.d, drivers/tapdisk-logs.xml
+  and drivers/tapdisk-logs/description.xml to
+  sysconfdir/xensource/bugtool, drivers/prune_tapdisk_logs to
+  sysconfdir/cron.daily
+- cpumond.service and tapback.service to the systemd unit directory
+  (auto-detected via pkg-config's systemd.pc when available, otherwise
+  /usr/lib/systemd/system)
+
+Use the standard meson/autotools-style directory options to relocate
+any of this, e.g.:
+
+    meson setup build --prefix=/usr --sysconfdir=/etc
+
+or install into a staging area without touching the running system:
+
+    DESTDIR=/tmp/staging meson install -C build
+
+Running the unit tests
+=======================
+
+The mockatests unit tests (cmocka-based) are built by passing -Dtests=true,
+and run via `meson test`:
+
+    meson setup build -Dtests=true
+    meson compile -C build
+    meson test -C build
+
+Coverage (equivalent of the old "make check GCOV=true")
+=========================================================
+
+Configure with both the project's GCOV option (which also implies
+-Dtests=true) and meson's built-in b_coverage option (which instruments
+the production libraries, not just the test binaries):
+
+    meson setup build -DGCOV=true -Db_coverage=true
+    meson compile -C build
+
+Then build the lcov/genhtml report and collect the test logs and raw gcov
+files with:
+
+    ./collect-test-results.sh build <output-directory>
+
+The HTML report is written to <output-directory>/coverage-html/index.html.

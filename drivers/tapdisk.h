@@ -47,6 +47,8 @@
 #ifndef _TAPDISK_H_
 #define _TAPDISK_H_
 
+#include "config.h"
+
 #include <time.h>
 #include <stdint.h>
 

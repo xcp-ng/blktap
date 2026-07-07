@@ -17,68 +17,8 @@ cscope.*
 TAGS
 VERSION
 
-# ac/am
-Makefile.in
-/aclocal.m4
-/autom4te.cache/
-/compile
-/config.*
-/configure
-/depcomp
-/install-sh
-/libtool
-/ltmain.sh
-/m4/
-/missing
-/stamp-h1
-
-# executables
-/drivers/lock-util
-/drivers/tapdisk-stream
-/drivers/td-rated
-/drivers/td-util
-/drivers/tapdisk
-/cbt/cbt-util
-/control/tap-ctl
-/cpumond/cpumond
-/part/part-util
-/lvm/lvm-util
-/mockatests/cbt/test-cbt-util
-/mockatests/control/test-control
-/mockatests/drivers/test-drivers
-/mockatests/vhd/test-vhd-util
-/vhd/vhd-index
-/vhd/vhd-update
-/vhd/vhd-util
-/vhd/lib/test/random-copy
-/vhd/lib/test/test-snapshot
-/qcow2/qemu-img
-/tapback/tapback
-/test-driver
-
-# generated makefiles
-/Makefile
-/lvm/Makefile
-/part/Makefile
-/drivers/Makefile
-/drivers/crypto/Makefile
-/cbt/Makefile
-/control/Makefile
-/cpumond/Makefile
-/include/Makefile
-/mockatests/Makefile
-/mockatests/cbt/Makefile
-/mockatests/control/Makefile
-/mockatests/drivers/Makefile
-/mockatests/vhd/Makefile
-/mockatests/wrappers/Makefile
-/vhd/Makefile
-/vhd/lib/Makefile
-/vhd/lib/test/Makefile
-/qcow2/Makefile
-/qcow2/lib/Makefile
-/tapback/Makefile
-mk/config.log
+# meson
+/build/
 
 # dist output
 /blktap-*.tar.*
