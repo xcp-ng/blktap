@@ -172,6 +172,11 @@ typedef struct tapdisk_message_blkif {
 	 * Persistent grants feature enabled.
 	 */
 	bool persistent_grants;
+
+	/**
+	 * Maximum number of segments per page in indirect requests.
+	 */
+	uint32_t indirect_max_segments;
 } tapdisk_message_blkif_t;
 
 /**

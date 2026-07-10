@@ -1240,13 +1240,16 @@ tapdisk_control_xenblkif_connect(
 
     DPRINTF("connecting VBD %d domid=%d, devid=%d, queues=%d,"
 	    " persistent-grants=%s,"
+	    " indirect-segs=%s (max %d),"
 	    " pool %s, evt %d, poll duration %d, poll idle threshold %d\n",
 	    vbd->uuid, blkif->domid, blkif->devid, blkif->nr_queues,
 	    blkif->persistent_grants ? "yes":"no",
+	    blkif->indirect_max_segments ? "enabled":"disabled", blkif->indirect_max_segments,
 	    pool_name, blkif->ports[0], blkif->poll_duration, blkif->poll_idle_threshold);
 
     err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid, &blkif->gref[0][0],
 				blkif->order, blkif->ports[0], blkif->persistent_grants,
+				blkif->indirect_max_segments,
 				blkif->proto, blkif->poll_duration, blkif->poll_idle_threshold,
 				pool_name, vbd);
 
