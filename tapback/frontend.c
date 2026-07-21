@@ -347,9 +347,9 @@ connect_frontend(vbd_t *device) {
          */
 
         /*
-		 * Write the number of sectors, sector size, info, and barrier support
-		 * to the back-end path in XenStore so that the front-end creates a VBD
-		 * with the appropriate characteristics.
+         * Write the number of sectors, sector size, info, and barrier support
+         * to the back-end path in XenStore so that the front-end creates a VBD
+         * with the appropriate characteristics.
          */
         if ((err = tapback_device_printf(device, xst, "feature-barrier", true,
                         "%d", device->backend->barrier ? 1 : 0))) {
@@ -376,7 +376,7 @@ connect_frontend(vbd_t *device) {
             break;
         }
 
-		abort_transaction = false;
+        abort_transaction = false;
         if (!xs_transaction_end(device->backend->xs, xst, 0)) {
             err = -errno;
             ASSERT(err);
