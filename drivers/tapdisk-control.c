@@ -846,6 +846,8 @@ out:
 		response->u.image.sectors = vbd->disk_info.size;
 		response->u.image.sector_size = vbd->disk_info.sector_size;
 		response->u.image.info = vbd->disk_info.info;
+		response->u.image.max_queues =
+			td_flag_test(vbd->driver_flags, TD_DRIVER_MULTIQUEUE) ? BLKIF_MAX_QUEUES : 1;
 		response->u.image.discard = vbd->disk_info.discard;
 		response->u.image.discard_granularity = vbd->disk_info.discard_granularity;
 		response->type = TAPDISK_MESSAGE_OPEN_RSP;
@@ -1319,6 +1321,7 @@ tapdisk_control_disk_info(
 	tapdisk_message_image_t *image;
 	int err = 0;
 	td_vbd_t *vbd = NULL;
+	int max_queues;
 
 	ASSERT(conn);
 	ASSERT(request);
@@ -1333,9 +1336,12 @@ tapdisk_control_disk_info(
 		goto out;
 	}
 
-	DPRINTF("VBD %d got disk info: sectors=%llu sector size=%ld, info=%d, discard=%s, discard granularity=%ld\n",
+	max_queues = td_flag_test(vbd->driver_flags, TD_DRIVER_MULTIQUEUE) ? BLKIF_MAX_QUEUES : 1;
+
+	DPRINTF("VBD %d got disk info: sectors=%llu sector size=%ld, info=%d, queues=%d, discard=%s, discard granularity=%ld\n",
 		vbd->uuid, (unsigned long long)vbd->disk_info.size,
 		vbd->disk_info.sector_size, vbd->disk_info.info,
+		max_queues,
 		vbd->disk_info.discard ? "true" : "false",
 		vbd->disk_info.discard_granularity);
 out:
@@ -1346,6 +1352,7 @@ out:
 		image->info = vbd->disk_info.info;
 		image->discard = vbd->disk_info.discard;
 		image->discard_granularity = vbd->disk_info.discard_granularity;
+		image->max_queues = max_queues;
 	}
 	return td_err_set_errno(error, err);
 }

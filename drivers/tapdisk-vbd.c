@@ -640,8 +640,9 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 	if (err)
 		goto fail;
 
-	if (td_flag_test(tapdisk_vbd_first_image(vbd)->driver->ops->flags, TD_DRIVER_THREADED)) {
-		vbd->driver_flags = tapdisk_vbd_first_image(vbd)->driver->ops->flags;
+	vbd->driver_flags = tapdisk_vbd_first_image(vbd)->driver->ops->flags;
+
+	if (td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED)) {
 
 		/* Should wake the write thread/blkif */
 		for (int qid = 0; qid < ARRAY_SIZE(vbd->queues); qid++) {

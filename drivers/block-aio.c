@@ -263,7 +263,7 @@ void tdaio_stats(td_driver_t *driver, td_stats_t *st)
 
 struct tap_disk tapdisk_aio = {
 	.disk_type          = "tapdisk_aio",
-	.flags              = 0,
+	.flags              = TD_DRIVER_MULTIQUEUE,
 	.private_data_size  = sizeof(struct tdaio_state),
 	.td_open            = tdaio_open,
 	.td_close           = tdaio_close,

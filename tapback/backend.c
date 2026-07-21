@@ -497,6 +497,15 @@ physical_device_changed(vbd_t *device) {
         goto out;
     }
 
+    /* Enable multi-queue */
+    if (device->max_queues > 1) {
+	if ((err = tapback_device_printf(device, XBT_NULL, "multi-queue-max-queues", true, "%d",
+					 device->max_queues))) {
+	    WARN(device, "failed to write multi-queue-max-queues: %s\n", strerror(-err));
+	    goto out;
+	}
+    }
+
 	err = tapback_device_printf(device, XBT_NULL, "kthread-pid", false, "%d",
 		device->tap->pid);
 	if (unlikely(err)) {
