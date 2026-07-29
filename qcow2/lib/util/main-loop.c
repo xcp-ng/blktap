@@ -208,6 +208,19 @@ int qemu_deinit_main_loop(void)
 {
     GSource *src;
 
+    /*
+     * Delete qemu_notify_bh and sigfd first, while qemu_aio_context is still
+     * guaranteed alive.
+     */
+    qemu_bh_delete(qemu_notify_bh);
+    qemu_notify_bh = NULL;
+
+    if (sigfd != -1) {
+        aio_set_fd_handler(iohandler_get_aio_context(), sigfd, NULL, NULL, NULL, NULL, NULL);
+        close(sigfd);
+        sigfd = -1;
+    }
+
     src = iohandler_get_g_source();
     g_source_unref(src);
     g_source_destroy(src);
@@ -219,15 +232,6 @@ int qemu_deinit_main_loop(void)
     g_source_unref(src);
 
     g_array_free(gpollfds, TRUE);
-
-    qemu_bh_delete(qemu_notify_bh);
-    qemu_notify_bh = NULL;
-
-    if (sigfd != -1) {
-        aio_set_fd_handler(iohandler_get_aio_context(), sigfd, NULL, NULL, NULL, NULL, NULL);
-        close(sigfd);
-        sigfd = -1;
-    }
 
     iohandler_deinit();
     qemu_aio_context = NULL;
