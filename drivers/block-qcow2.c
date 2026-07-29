@@ -166,6 +166,7 @@ struct qcow2_state {
 	pthread_mutex_t           lock;
 	pthread_cond_t            cond;
 	bool                      driver_opened;
+	bool                      handling_requests;
 	int                       open_status;
 	MemReentrancyGuard        mem_reentrancy_guard;
 
@@ -249,6 +250,13 @@ static void qcow2_handle_requests(struct qcow2_state *s)
 	struct qcow2_request *req;
 
 	pthread_mutex_lock(&s->lock);
+	if (s->handling_requests) {
+		/* Re-entered from inside a request handler: leave the
+		 * queue untouched, the outer loop below will drain it. */
+		pthread_mutex_unlock(&s->lock);
+		return;
+	}
+	s->handling_requests = true;
 	while ((req = QSIMPLEQ_FIRST(&s->inflight))) {
 		QSIMPLEQ_REMOVE_HEAD(&s->inflight, list);
 		pthread_mutex_unlock(&s->lock);
@@ -272,6 +280,7 @@ static void qcow2_handle_requests(struct qcow2_state *s)
 		}
 		pthread_mutex_lock(&s->lock);
 	}
+	s->handling_requests = false;
 	pthread_mutex_unlock(&s->lock);
 }
 
