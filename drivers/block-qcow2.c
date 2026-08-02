@@ -170,6 +170,7 @@ struct qcow2_state {
 	pthread_mutex_t           lock;
 	pthread_cond_t            cond;
 	bool                      driver_opened;
+	bool                      open_done;
 	int                       open_status;
 	MemReentrancyGuard        mem_reentrancy_guard;
 
@@ -435,6 +436,7 @@ qcow2_open(void *opaque)
 
 	pthread_mutex_lock(&s->lock);
 	s->open_status = 0;
+	s->open_done = true;
 	pthread_cond_signal(&s->cond);
 
 	while (s->driver_opened) {
@@ -444,8 +446,42 @@ qcow2_open(void *opaque)
 	}
 	pthread_mutex_unlock(&s->lock);
 
+	/*
+	 * Nothing must outlive this thread: the BlockBackend, the AioContext and
+	 * the driver state are all torn down below. A job that is still live
+	 * here would keep references to them, so cancel it before dismissing it.
+	 * job_dismiss_locked() only accepts a concluded job, which is why it used
+	 * to fail with "job dismiss error" and leave the job behind.
+	 */
 	job_lock();
 	BlockJob *bjob = block_job_get_locked(COMMIT_JOB_ID);
+	if (bjob) {
+		/*
+		 * Same restriction as do_cancel_commit_job(): only the states
+		 * where the job is started and stays alive on its own. The
+		 * transient finalization states cannot be observed here, because
+		 * the job is created with auto_finalize and this code runs with
+		 * an empty stack, not from the nested poll inside a finalize.
+		 * Force-cancel: this is the last chance to stop the job before
+		 * everything it references is destroyed below.
+		 */
+		switch (bjob->job.status) {
+		case JOB_STATUS_RUNNING:
+		case JOB_STATUS_PAUSED:
+		case JOB_STATUS_READY:
+		case JOB_STATUS_STANDBY: {
+			int cancel_err = job_cancel_sync_locked(&bjob->job, true);
+			if (cancel_err && cancel_err != -ECANCELED)
+				DPRINTF("Qcow2: job cancel error at close: %d\n", cancel_err);
+			break;
+		}
+		default:
+			break;
+		}
+
+		/* The cancel may have dismissed and freed the job already. */
+		bjob = block_job_get_locked(COMMIT_JOB_ID);
+	}
 	if (bjob) {
 		Job *job = &bjob->job;
 		job_dismiss_locked(&job, &local_err);
@@ -482,6 +518,7 @@ qcow2_open(void *opaque)
 
 	pthread_mutex_lock(&s->lock);
 	s->open_status = -EINVAL;
+	s->open_done = true;
 	pthread_cond_signal(&s->cond);
 	pthread_mutex_unlock(&s->lock);
 
@@ -527,11 +564,27 @@ _qcow2_open(td_driver_t *driver, const char *name,
 	qemu_thread_create(&s->thread, "td-qcow2", qcow2_open, s,
 			   QEMU_THREAD_JOINABLE);
 
-	pthread_cond_wait(&s->cond, &s->lock);
+	while (!s->open_done)
+		pthread_cond_wait(&s->cond, &s->lock);
 	err = s->open_status;
 	s->open_status = 0;
 	pthread_mutex_unlock(&s->lock);
 
+	if (err) {
+		/*
+		 * The thread tears the QEMU globals down (main loop, BQL, CPU
+		 * loop) on its way out. tapdisk frees the driver state and
+		 * retries the open right away, so wait for it to be gone before
+		 * returning: otherwise the next attempt re-initializes those
+		 * globals while this thread is still destroying them.
+		 */
+		qemu_thread_join(&s->thread);
+
+		pthread_cond_destroy(&s->commit_cond);
+		pthread_mutex_destroy(&s->commit_lock);
+		pthread_cond_destroy(&s->cond);
+		pthread_mutex_destroy(&s->lock);
+	}
 
 	return err;
 }
@@ -546,11 +599,19 @@ _qcow2_close(td_driver_t *driver)
 
 	DBG(TLOG_WARN, "qcow2_close\n");
 
+	/*
+	 * Kick the thread while still holding the lock. The thread can only
+	 * observe driver_opened == false with s->lock held, hence only once this
+	 * has released it, so the bottom half is guaranteed to still exist when
+	 * it is scheduled here. Kicking after the unlock instead leaves a window
+	 * where the thread has already left its loop, deleted the bottom half
+	 * and finalized the AioContext, and the kick writes into freed memory
+	 * and notifies a destroyed event notifier.
+	 */
 	pthread_mutex_lock(&s->lock);
 	s->driver_opened = false;
-	pthread_mutex_unlock(&s->lock);
-
 	qemu_bh_schedule(s->bh);
+	pthread_mutex_unlock(&s->lock);
 
 	// Ignore return, qcow2_open() always return NULL; or will abort
 	qemu_thread_join(&s->thread);
@@ -1155,13 +1216,52 @@ do_cancel_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 		goto signal;
 	}
 
-	if (bjob->job.status == JOB_STATUS_RUNNING ||
-		bjob->job.status == JOB_STATUS_READY) {
+	/*
+	 * Cancel the job in every state where it is started and can stay alive
+	 * on its own. Restricting this to RUNNING and READY made the cancel a
+	 * silent no-op that still reported success for a paused or standby job,
+	 * and the caller (typically _qcow2_close()) then tore the BlockBackend
+	 * and the AioContext down underneath it.
+	 *
+	 * CREATED, WAITING, PENDING and ABORTING are deliberately excluded even
+	 * though the verb table allows some of them. The job is created with
+	 * auto_finalize, so those states only exist while commit_start() or the
+	 * finalization sequence is on the stack, and this handler can be reached
+	 * from the nested aio_bh_poll() that bdrv_graph_wrunlock() performs
+	 * inside them. Cancelling there re-enters job_finalize_single_locked()
+	 * on a job that is already being finalized: the job state machine
+	 * asserts, the transaction is unreferenced twice, and commit_abort()
+	 * runs on half-initialized or already-cleaned job state.
+	 */
+	switch (bjob->job.status) {
+	case JOB_STATUS_RUNNING:
+	case JOB_STATUS_PAUSED:
+	case JOB_STATUS_READY:
+	case JOB_STATUS_STANDBY:
 		if (req->sync == false) {
 			job_cancel_locked(&bjob->job, false);
 		} else {
+			/*
+			 * The job may be dismissed and freed by the cancel, so
+			 * bjob must not be used afterwards.
+			 */
 			err = job_cancel_sync_locked(&bjob->job, false);
 		}
+		break;
+	case JOB_STATUS_CONCLUDED:
+		/* Already finished, nothing left to cancel. */
+		DPRINTF("Qcow2: job already concluded.\n");
+		break;
+	default:
+		/*
+		 * Mid-finalization. Do not report this as a successful cancel:
+		 * the job is about to complete, and telling the caller it was
+		 * cancelled would have it believe the chain was left alone.
+		 */
+		DPRINTF("Qcow2: not cancelling job in state '%s'.\n",
+			JobStatus_str(bjob->job.status));
+		err = -EBUSY;
+		break;
 	}
 	job_unlock();
 
