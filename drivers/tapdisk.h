@@ -216,6 +216,13 @@ struct td_query {
         uint64_t                    current_progress;
         uint64_t                    total_progress;
         const char                  *status;
+        /*
+         * Result of the job itself, as opposed to the result of the query.
+         * Meaningful once the status says the job concluded, which keeps
+         * being reported after the job has been reaped, until another one is
+         * started. Zero when it succeeded, and when no job has run.
+         */
+        int                         job_error;
 };
 
 /* 

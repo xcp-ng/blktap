@@ -118,6 +118,14 @@ struct tapdisk_message_query {
 	uint64_t                         current_progress;
 	uint64_t                         total_progress;
 	char                             status[TAPDISK_MESSAGE_STRING_LENGTH];
+	/*
+	 * Result of the commit job, valid once its status says concluded. Zero
+	 * when it succeeded, and when no job has run. Appended at the end of
+	 * the structure on purpose: the enclosing union is larger than this
+	 * member, so the on-the-wire message size does not change, which the
+	 * assertion below enforces.
+	 */
+	int32_t                          job_error;
 };
 
 /**
@@ -211,6 +219,18 @@ struct tapdisk_message {
 		tapdisk_message_query_t    query;
 	} u;
 };
+
+/*
+ * The control message is exchanged as a fixed number of bytes and there is no
+ * version negotiation, so growing the largest member of the union silently
+ * breaks every tapdisk and tap-ctl that was built against another revision.
+ * Adding fields to a smaller member, as the query response does, is safe only
+ * for as long as it stays smaller.
+ */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(tapdisk_message_query_t) <= sizeof(tapdisk_message_params_t),
+	       "the query response must not grow the control message");
+#endif
 
 enum tapdisk_message_id {
 	TAPDISK_MESSAGE_ERROR = 1,

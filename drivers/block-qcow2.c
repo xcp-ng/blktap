@@ -179,6 +179,10 @@ struct qcow2_state {
 	pthread_mutex_t           commit_lock;
 	pthread_cond_t            commit_cond;
 	JobInfo                   job_info;
+	/* Result of the commit job, valid once it has concluded */
+	int                       job_ret;
+	/* The job concluded and was dismissed; job_info/job_ret are its outcome */
+	bool                      job_reaped;
 
 	/* Stats */
 	uint64_t                  queued;
@@ -1020,6 +1024,19 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 	BlockDriverState *bs, *top_bs, *base_bs;
 	int err = 0;
 
+	/*
+	 * A new commit invalidates the result kept from the previous one, even
+	 * if this one turns out not to start a job at all: reporting the old
+	 * error against a new request would be worse than reporting nothing.
+	 */
+	pthread_mutex_lock(&s->commit_lock);
+	s->job_ret = 0;
+	s->job_reaped = false;
+	s->job_info.status = JOB_STATUS_UNDEFINED;
+	s->job_info.current_progress = 0;
+	s->job_info.total_progress = 0;
+	pthread_mutex_unlock(&s->commit_lock);
+
 	bs = blk_bs(s->conf.blk);
 	node = bs->node_name;
 	if (strcmp(bs->filename, req->top) == 0) {
@@ -1092,6 +1109,7 @@ qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 		query->status = JobStatus_str(s->job_info.status);
 		query->current_progress = s->job_info.current_progress;
 		query->total_progress = s->job_info.total_progress;
+		query->job_error = s->job_ret;
 	}
 
 	err = req->error;
@@ -1112,6 +1130,8 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 	BlockJob *bjob;
 	JobStatus status = JOB_STATUS_UNDEFINED;
 	uint64_t current = 0, total = 0;
+	int job_ret = 0;
+	bool have_job = false;
 
 	job_lock();
 	bjob = block_job_get_locked(COMMIT_JOB_ID);
@@ -1120,10 +1140,19 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 		DPRINTF("Qcow2: no job running.\n");
 		goto signal;
 	}
+	have_job = true;
 
 	status  = bjob->job.status;
 	current = bjob->job.progress.current;
 	total   = bjob->job.progress.total;
+	/*
+	 * The result of the job, not of this query. It is only meaningful once
+	 * the job reached CONCLUDED, and it is the only way for the caller to
+	 * tell a coalesce that finished from one that aborted: both end up
+	 * concluded, and an aborted commit can even report full progress since
+	 * the data copy itself did complete.
+	 */
+	job_ret = bjob->job.ret;
 
 	if (status == JOB_STATUS_READY) {
 		Job *job = &bjob->job;
@@ -1149,9 +1178,33 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 
 signal:
 	pthread_mutex_lock(&s->commit_lock);
-	s->job_info.status = status;
-	s->job_info.current_progress = current;
-	s->job_info.total_progress = total;
+	if (have_job) {
+		s->job_info.status = status;
+		s->job_info.current_progress = current;
+		s->job_info.total_progress = total;
+		s->job_ret = job_ret;
+		/*
+		 * A concluded job is dismissed by the query that observes it,
+		 * so it is gone from the next query onwards. Remember the whole
+		 * outcome, not just the result: reporting the result next to a
+		 * status of undefined would be useless, because a caller is told
+		 * to read the result only once the status says concluded.
+		 */
+		if (status == JOB_STATUS_CONCLUDED)
+			s->job_reaped = true;
+	} else if (!s->job_reaped) {
+		s->job_info.status = status;
+		s->job_info.current_progress = current;
+		s->job_info.total_progress = total;
+		s->job_ret = job_ret;
+	}
+	/*
+	 * Otherwise keep what the last job ended with, so that a lost or
+	 * duplicated query cannot turn a failed coalesce into a successful
+	 * looking one. It is cleared when the next commit starts, and it does
+	 * not outlive the driver: a pause closes and reopens it, which resets
+	 * this along with everything else.
+	 */
 
 	req->error = err;
 	req->done  = true;

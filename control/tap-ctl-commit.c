@@ -34,6 +34,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -90,7 +91,14 @@ tap_ctl_query_commit_job(const int id, const int minor)
 		return err;
 
 	if (message.type == TAPDISK_MESSAGE_QUERY_COMMIT_JOB_RSP) {
-		printf("Commit status '%s' (%lu/%lu)\n", message.u.query.status, message.u.query.current_progress, message.u.query.total_progress);
+		/*
+		 * The job result is a negative errno, or zero, and is appended
+		 * after the existing fields so that readers matching the old
+		 * format keep working unchanged.
+		 */
+		printf("Commit status '%s' (%lu/%lu) error %"PRId32"\n",
+		       message.u.query.status, message.u.query.current_progress,
+		       message.u.query.total_progress, message.u.query.job_error);
 		err = 0;
 	} else if (message.type == TAPDISK_MESSAGE_ERROR) {
 		err = -message.u.response.error;
