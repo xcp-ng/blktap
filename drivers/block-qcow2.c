@@ -110,6 +110,11 @@ struct qcow2_request;
 
 struct qcow2_request {
 	int                     error;
+	/*
+	 * Predicate for the control operations (commit, query, cancel): set by
+	 * the qcow2 thread under commit_lock once error/job_info are valid.
+	 */
+	bool                    done;
 	enum qcow2_ops          op;
 	union {
 		/* OP_READ, OP_WRITE */
@@ -527,6 +532,7 @@ _qcow2_open(td_driver_t *driver, const char *name,
 	s->open_status = 0;
 	pthread_mutex_unlock(&s->lock);
 
+
 	return err;
 }
 
@@ -916,15 +922,26 @@ qcow2_commit(td_driver_t *driver, const char *name)
 
 	req->top   = strdup(name);
 	req->op    = QCOW2_OP_COMMIT;
+	req->error = 0;
+	req->done  = false;
+
+	/*
+	 * Lock order is commit_lock -> lock, and never the reverse: the qcow2
+	 * thread releases lock before dispatching a request, so no handler takes
+	 * commit_lock while holding lock. Holding commit_lock across the publish
+	 * is belt and braces on top of the done predicate below; the predicate
+	 * alone would already stop the wakeup from being lost.
+	 */
+	pthread_mutex_lock(&s->commit_lock);
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
-	pthread_mutex_lock(&s->commit_lock);
 	qemu_bh_schedule(s->bh);
 
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	while (!req->done)
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
@@ -977,7 +994,8 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 signal_commit:
 	pthread_mutex_lock(&s->commit_lock);
 	req->error = err;
-	pthread_cond_signal(&s->commit_cond);
+	req->done  = true;
+	pthread_cond_broadcast(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
 
@@ -995,15 +1013,19 @@ qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 		return -EBUSY;
 
 	req->op    = QCOW2_OP_QUERY;
+	req->error = 0;
+	req->done  = false;
+
+	pthread_mutex_lock(&s->commit_lock);
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
-	pthread_mutex_lock(&s->commit_lock);
 	qemu_bh_schedule(s->bh);
 
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	while (!req->done)
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 
 	if (query) {
 		query->status = JobStatus_str(s->job_info.status);
@@ -1071,12 +1093,13 @@ signal:
 	s->job_info.total_progress = total;
 
 	req->error = err;
-	pthread_cond_signal(&s->commit_cond);
+	req->done  = true;
+	pthread_cond_broadcast(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
 
 
-int
+static int
 qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
@@ -1089,17 +1112,21 @@ qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 	if (!req)
 		return -EBUSY;
 
-	req->op   = QCOW2_OP_CANCEL_COMMIT;
-	req->sync = wait;
+	req->op    = QCOW2_OP_CANCEL_COMMIT;
+	req->sync  = wait;
+	req->error = 0;
+	req->done  = false;
+
+	pthread_mutex_lock(&s->commit_lock);
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
-	pthread_mutex_lock(&s->commit_lock);
 	qemu_bh_schedule(s->bh);
 
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	while (!req->done)
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
@@ -1143,7 +1170,8 @@ do_cancel_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 signal:
 	pthread_mutex_lock(&s->commit_lock);
 	req->error = err;
-	pthread_cond_signal(&s->commit_cond);
+	req->done  = true;
+	pthread_cond_broadcast(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
 
