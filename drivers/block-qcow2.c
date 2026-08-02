@@ -110,6 +110,7 @@ struct qcow2_request;
 
 struct qcow2_request {
 	int                     error;
+	bool                    done;
 	enum qcow2_ops          op;
 	union {
 		/* OP_READ, OP_WRITE */
@@ -916,15 +917,17 @@ qcow2_commit(td_driver_t *driver, const char *name)
 
 	req->top   = strdup(name);
 	req->op    = QCOW2_OP_COMMIT;
+	req->done  = false;
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
 	pthread_mutex_lock(&s->commit_lock);
-	qemu_bh_schedule(s->bh);
-
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	if (!req->done) {
+		qemu_bh_schedule(s->bh);
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	}
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
@@ -977,6 +980,7 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 signal_commit:
 	pthread_mutex_lock(&s->commit_lock);
 	req->error = err;
+	req->done  = true;
 	pthread_cond_signal(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
@@ -995,15 +999,17 @@ qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 		return -EBUSY;
 
 	req->op    = QCOW2_OP_QUERY;
+	req->done  = false;
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
 	pthread_mutex_lock(&s->commit_lock);
-	qemu_bh_schedule(s->bh);
-
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	if (!req->done) {
+		qemu_bh_schedule(s->bh);
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	}
 
 	if (query) {
 		query->status = JobStatus_str(s->job_info.status);
@@ -1071,6 +1077,7 @@ signal:
 	s->job_info.total_progress = total;
 
 	req->error = err;
+	req->done  = true;
 	pthread_cond_signal(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
@@ -1091,15 +1098,17 @@ qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 
 	req->op   = QCOW2_OP_CANCEL_COMMIT;
 	req->sync = wait;
+	req->done = false;
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
 	pthread_mutex_lock(&s->commit_lock);
-	qemu_bh_schedule(s->bh);
-
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	if (!req->done) {
+		qemu_bh_schedule(s->bh);
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	}
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
@@ -1143,6 +1152,7 @@ do_cancel_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 signal:
 	pthread_mutex_lock(&s->commit_lock);
 	req->error = err;
+	req->done  = true;
 	pthread_cond_signal(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
