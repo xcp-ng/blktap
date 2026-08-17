@@ -168,6 +168,18 @@ tapdisk_vbd_first_image(td_vbd_t *vbd)
 }
 
 static inline td_image_t *
+tapdisk_vbd_first_non_log_image(td_vbd_t *vbd)
+{
+	td_image_t *image = NULL, *tmp;
+
+	tapdisk_vbd_for_each_image(vbd, image, tmp)
+		if (image->type != DISK_TYPE_LOG)
+			return image;
+
+	return image;
+}
+
+static inline td_image_t *
 tapdisk_vbd_last_image(td_vbd_t *vbd)
 {
 	td_image_t *image = NULL;
@@ -1146,7 +1158,7 @@ tapdisk_vbd_commit(td_vbd_t *vbd, const char *name)
 		INFO("commit %s\n", name);
 	}
 
-	err = td_commit(tapdisk_vbd_first_image(vbd), name);
+	err = td_commit(tapdisk_vbd_first_non_log_image(vbd), name);
 
 	INFO("commit started (%d)\n", err);
 
@@ -1162,7 +1174,7 @@ tapdisk_vbd_query_commit_job(td_vbd_t *vbd, td_query_t *query)
 		INFO("query commit job.\n");
 	}
 
-	err = td_query_commit_job(tapdisk_vbd_first_image(vbd), query);
+	err = td_query_commit_job(tapdisk_vbd_first_non_log_image(vbd), query);
 
 	INFO("query commit job (%d)\n", err);
 
@@ -1178,7 +1190,7 @@ tapdisk_vbd_cancel_commit_job(td_vbd_t *vbd, bool wait)
 		INFO("cancel commit job.\n");
 	}
 
-	err = td_cancel_commit_job(tapdisk_vbd_first_image(vbd), wait);
+	err = td_cancel_commit_job(tapdisk_vbd_first_non_log_image(vbd), wait);
 
 	INFO("cancel commit job (%d)\n", err);
 
