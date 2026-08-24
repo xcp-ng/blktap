@@ -469,6 +469,7 @@ qcow2_open(void *opaque)
 		 * everything it references is destroyed below.
 		 */
 		switch (bjob->job.status) {
+		case JOB_STATUS_CREATED:
 		case JOB_STATUS_RUNNING:
 		case JOB_STATUS_PAUSED:
 		case JOB_STATUS_READY:
@@ -1215,6 +1216,7 @@ do_cancel_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 	 * runs on half-initialized or already-cleaned job state.
 	 */
 	switch (bjob->job.status) {
+	case JOB_STATUS_CREATED:
 	case JOB_STATUS_RUNNING:
 	case JOB_STATUS_PAUSED:
 	case JOB_STATUS_READY:
