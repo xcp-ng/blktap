@@ -562,6 +562,19 @@ _qcow2_open(td_driver_t *driver, const char *name,
 	s->open_status = 0;
 	pthread_mutex_unlock(&s->lock);
 
+	if (err) {
+		/*
+                 * Join the teardown thread before returning so a retried
+                 * open doesn't reinit QEMU globals while it's still running.
+		 */
+		qemu_thread_join(&s->thread);
+
+		pthread_cond_destroy(&s->commit_cond);
+		pthread_mutex_destroy(&s->commit_lock);
+		pthread_cond_destroy(&s->cond);
+		pthread_mutex_destroy(&s->lock);
+	}
+
 	return err;
 }
 
