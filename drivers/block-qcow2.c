@@ -588,11 +588,15 @@ _qcow2_close(td_driver_t *driver)
 
 	DBG(TLOG_WARN, "qcow2_close\n");
 
+        /*
+         * Kick while still holding the lock: the thread only checks
+         * driver_opened after taking s->lock, so kicking after unlock
+         * risks the bh/AioContext already being torn down.
+         */
 	pthread_mutex_lock(&s->lock);
 	s->driver_opened = false;
-	pthread_mutex_unlock(&s->lock);
-
 	qemu_bh_schedule(s->bh);
+	pthread_mutex_unlock(&s->lock);
 
 	// Ignore return, qcow2_open() always return NULL; or will abort
 	qemu_thread_join(&s->thread);
