@@ -1369,7 +1369,7 @@ tapdisk_control_query_commit_job(struct tapdisk_ctl_conn *conn,
 {
 	int err;
 	td_vbd_t *vbd;
-	td_query_t query;
+	td_query_t query = { 0 };
 
 	ASSERT(conn);
 	ASSERT(request);
@@ -1397,6 +1397,7 @@ out:
 				sizeof(response->u.query.status));
 		response->u.query.current_progress = query.current_progress;
 		response->u.query.total_progress = query.total_progress;
+		response->u.query.job_error = query.job_error;
 	}
 	return td_err_set_errno(error, err);
 }

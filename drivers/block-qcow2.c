@@ -110,6 +110,11 @@ struct qcow2_request;
 
 struct qcow2_request {
 	int                     error;
+	/*
+	 * Predicate for the control operations (commit, query, cancel): set by
+	 * the qcow2 thread under commit_lock once error/job_info are valid.
+	 */
+	bool                    done;
 	enum qcow2_ops          op;
 	union {
 		/* OP_READ, OP_WRITE */
@@ -165,6 +170,7 @@ struct qcow2_state {
 	pthread_mutex_t           lock;
 	pthread_cond_t            cond;
 	bool                      driver_opened;
+	bool                      open_done;
 	int                       open_status;
 	MemReentrancyGuard        mem_reentrancy_guard;
 
@@ -173,6 +179,10 @@ struct qcow2_state {
 	pthread_mutex_t           commit_lock;
 	pthread_cond_t            commit_cond;
 	JobInfo                   job_info;
+	/* Result of the commit job, valid once it has concluded */
+	int                       job_ret;
+	/* The job concluded and was dismissed; job_info/job_ret are its outcome */
+	bool                      job_reaped;
 
 	/* Stats */
 	uint64_t                  queued;
@@ -430,6 +440,7 @@ qcow2_open(void *opaque)
 
 	pthread_mutex_lock(&s->lock);
 	s->open_status = 0;
+	s->open_done = true;
 	pthread_cond_signal(&s->cond);
 
 	while (s->driver_opened) {
@@ -439,8 +450,42 @@ qcow2_open(void *opaque)
 	}
 	pthread_mutex_unlock(&s->lock);
 
+	/*
+	 * Nothing must outlive this thread: the BlockBackend, the AioContext and
+	 * the driver state are all torn down below. A job that is still live
+	 * here would keep references to them, so cancel it before dismissing it.
+	 * job_dismiss_locked() only accepts a concluded job, which is why it used
+	 * to fail with "job dismiss error" and leave the job behind.
+	 */
 	job_lock();
 	BlockJob *bjob = block_job_get_locked(COMMIT_JOB_ID);
+	if (bjob) {
+		/*
+		 * Same restriction as do_cancel_commit_job(): only the states
+		 * where the job is started and stays alive on its own. The
+		 * transient finalization states cannot be observed here, because
+		 * the job is created with auto_finalize and this code runs with
+		 * an empty stack, not from the nested poll inside a finalize.
+		 * Force-cancel: this is the last chance to stop the job before
+		 * everything it references is destroyed below.
+		 */
+		switch (bjob->job.status) {
+		case JOB_STATUS_RUNNING:
+		case JOB_STATUS_PAUSED:
+		case JOB_STATUS_READY:
+		case JOB_STATUS_STANDBY: {
+			int cancel_err = job_cancel_sync_locked(&bjob->job, true);
+			if (cancel_err && cancel_err != -ECANCELED)
+				DPRINTF("Qcow2: job cancel error at close: %d\n", cancel_err);
+			break;
+		}
+		default:
+			break;
+		}
+
+		/* The cancel may have dismissed and freed the job already. */
+		bjob = block_job_get_locked(COMMIT_JOB_ID);
+	}
 	if (bjob) {
 		Job *job = &bjob->job;
 		job_dismiss_locked(&job, &local_err);
@@ -477,6 +522,7 @@ qcow2_open(void *opaque)
 
 	pthread_mutex_lock(&s->lock);
 	s->open_status = -EINVAL;
+	s->open_done = true;
 	pthread_cond_signal(&s->cond);
 	pthread_mutex_unlock(&s->lock);
 
@@ -522,10 +568,27 @@ _qcow2_open(td_driver_t *driver, const char *name,
 	qemu_thread_create(&s->thread, "td-qcow2", qcow2_open, s,
 			   QEMU_THREAD_JOINABLE);
 
-	pthread_cond_wait(&s->cond, &s->lock);
+	while (!s->open_done)
+		pthread_cond_wait(&s->cond, &s->lock);
 	err = s->open_status;
 	s->open_status = 0;
 	pthread_mutex_unlock(&s->lock);
+
+	if (err) {
+		/*
+		 * The thread tears the QEMU globals down (main loop, BQL, CPU
+		 * loop) on its way out. tapdisk frees the driver state and
+		 * retries the open right away, so wait for it to be gone before
+		 * returning: otherwise the next attempt re-initializes those
+		 * globals while this thread is still destroying them.
+		 */
+		qemu_thread_join(&s->thread);
+
+		pthread_cond_destroy(&s->commit_cond);
+		pthread_mutex_destroy(&s->commit_lock);
+		pthread_cond_destroy(&s->cond);
+		pthread_mutex_destroy(&s->lock);
+	}
 
 	return err;
 }
@@ -540,11 +603,19 @@ _qcow2_close(td_driver_t *driver)
 
 	DBG(TLOG_WARN, "qcow2_close\n");
 
+	/*
+	 * Kick the thread while still holding the lock. The thread can only
+	 * observe driver_opened == false with s->lock held, hence only once this
+	 * has released it, so the bottom half is guaranteed to still exist when
+	 * it is scheduled here. Kicking after the unlock instead leaves a window
+	 * where the thread has already left its loop, deleted the bottom half
+	 * and finalized the AioContext, and the kick writes into freed memory
+	 * and notifies a destroyed event notifier.
+	 */
 	pthread_mutex_lock(&s->lock);
 	s->driver_opened = false;
-	pthread_mutex_unlock(&s->lock);
-
 	qemu_bh_schedule(s->bh);
+	pthread_mutex_unlock(&s->lock);
 
 	// Ignore return, qcow2_open() always return NULL; or will abort
 	qemu_thread_join(&s->thread);
@@ -916,15 +987,26 @@ qcow2_commit(td_driver_t *driver, const char *name)
 
 	req->top   = strdup(name);
 	req->op    = QCOW2_OP_COMMIT;
+	req->error = 0;
+	req->done  = false;
+
+	/*
+	 * Lock order is commit_lock -> lock, and never the reverse: the qcow2
+	 * thread releases lock before dispatching a request, so no handler takes
+	 * commit_lock while holding lock. Holding commit_lock across the publish
+	 * is belt and braces on top of the done predicate below; the predicate
+	 * alone would already stop the wakeup from being lost.
+	 */
+	pthread_mutex_lock(&s->commit_lock);
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
-	pthread_mutex_lock(&s->commit_lock);
 	qemu_bh_schedule(s->bh);
 
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	while (!req->done)
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
@@ -941,6 +1023,19 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 	char *node, *top_node, *base_node;
 	BlockDriverState *bs, *top_bs, *base_bs;
 	int err = 0;
+
+	/*
+	 * A new commit invalidates the result kept from the previous one, even
+	 * if this one turns out not to start a job at all: reporting the old
+	 * error against a new request would be worse than reporting nothing.
+	 */
+	pthread_mutex_lock(&s->commit_lock);
+	s->job_ret = 0;
+	s->job_reaped = false;
+	s->job_info.status = JOB_STATUS_UNDEFINED;
+	s->job_info.current_progress = 0;
+	s->job_info.total_progress = 0;
+	pthread_mutex_unlock(&s->commit_lock);
 
 	bs = blk_bs(s->conf.blk);
 	node = bs->node_name;
@@ -977,7 +1072,8 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 signal_commit:
 	pthread_mutex_lock(&s->commit_lock);
 	req->error = err;
-	pthread_cond_signal(&s->commit_cond);
+	req->done  = true;
+	pthread_cond_broadcast(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
 
@@ -995,20 +1091,25 @@ qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 		return -EBUSY;
 
 	req->op    = QCOW2_OP_QUERY;
+	req->error = 0;
+	req->done  = false;
+
+	pthread_mutex_lock(&s->commit_lock);
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
-	pthread_mutex_lock(&s->commit_lock);
 	qemu_bh_schedule(s->bh);
 
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	while (!req->done)
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 
 	if (query) {
 		query->status = JobStatus_str(s->job_info.status);
 		query->current_progress = s->job_info.current_progress;
 		query->total_progress = s->job_info.total_progress;
+		query->job_error = s->job_ret;
 	}
 
 	err = req->error;
@@ -1029,6 +1130,8 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 	BlockJob *bjob;
 	JobStatus status = JOB_STATUS_UNDEFINED;
 	uint64_t current = 0, total = 0;
+	int job_ret = 0;
+	bool have_job = false;
 
 	job_lock();
 	bjob = block_job_get_locked(COMMIT_JOB_ID);
@@ -1037,10 +1140,19 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 		DPRINTF("Qcow2: no job running.\n");
 		goto signal;
 	}
+	have_job = true;
 
 	status  = bjob->job.status;
 	current = bjob->job.progress.current;
 	total   = bjob->job.progress.total;
+	/*
+	 * The result of the job, not of this query. It is only meaningful once
+	 * the job reached CONCLUDED, and it is the only way for the caller to
+	 * tell a coalesce that finished from one that aborted: both end up
+	 * concluded, and an aborted commit can even report full progress since
+	 * the data copy itself did complete.
+	 */
+	job_ret = bjob->job.ret;
 
 	if (status == JOB_STATUS_READY) {
 		Job *job = &bjob->job;
@@ -1066,17 +1178,42 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 
 signal:
 	pthread_mutex_lock(&s->commit_lock);
-	s->job_info.status = status;
-	s->job_info.current_progress = current;
-	s->job_info.total_progress = total;
+	if (have_job) {
+		s->job_info.status = status;
+		s->job_info.current_progress = current;
+		s->job_info.total_progress = total;
+		s->job_ret = job_ret;
+		/*
+		 * A concluded job is dismissed by the query that observes it,
+		 * so it is gone from the next query onwards. Remember the whole
+		 * outcome, not just the result: reporting the result next to a
+		 * status of undefined would be useless, because a caller is told
+		 * to read the result only once the status says concluded.
+		 */
+		if (status == JOB_STATUS_CONCLUDED)
+			s->job_reaped = true;
+	} else if (!s->job_reaped) {
+		s->job_info.status = status;
+		s->job_info.current_progress = current;
+		s->job_info.total_progress = total;
+		s->job_ret = job_ret;
+	}
+	/*
+	 * Otherwise keep what the last job ended with, so that a lost or
+	 * duplicated query cannot turn a failed coalesce into a successful
+	 * looking one. It is cleared when the next commit starts, and it does
+	 * not outlive the driver: a pause closes and reopens it, which resets
+	 * this along with everything else.
+	 */
 
 	req->error = err;
-	pthread_cond_signal(&s->commit_cond);
+	req->done  = true;
+	pthread_cond_broadcast(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
 
 
-int
+static int
 qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
@@ -1089,17 +1226,21 @@ qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 	if (!req)
 		return -EBUSY;
 
-	req->op   = QCOW2_OP_CANCEL_COMMIT;
-	req->sync = wait;
+	req->op    = QCOW2_OP_CANCEL_COMMIT;
+	req->sync  = wait;
+	req->error = 0;
+	req->done  = false;
+
+	pthread_mutex_lock(&s->commit_lock);
 
 	pthread_mutex_lock(&s->lock);
 	QSIMPLEQ_INSERT_TAIL(&s->inflight, req, list);
 	pthread_mutex_unlock(&s->lock);
 
-	pthread_mutex_lock(&s->commit_lock);
 	qemu_bh_schedule(s->bh);
 
-	pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+	while (!req->done)
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
@@ -1128,13 +1269,52 @@ do_cancel_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 		goto signal;
 	}
 
-	if (bjob->job.status == JOB_STATUS_RUNNING ||
-		bjob->job.status == JOB_STATUS_READY) {
+	/*
+	 * Cancel the job in every state where it is started and can stay alive
+	 * on its own. Restricting this to RUNNING and READY made the cancel a
+	 * silent no-op that still reported success for a paused or standby job,
+	 * and the caller (typically _qcow2_close()) then tore the BlockBackend
+	 * and the AioContext down underneath it.
+	 *
+	 * CREATED, WAITING, PENDING and ABORTING are deliberately excluded even
+	 * though the verb table allows some of them. The job is created with
+	 * auto_finalize, so those states only exist while commit_start() or the
+	 * finalization sequence is on the stack, and this handler can be reached
+	 * from the nested aio_bh_poll() that bdrv_graph_wrunlock() performs
+	 * inside them. Cancelling there re-enters job_finalize_single_locked()
+	 * on a job that is already being finalized: the job state machine
+	 * asserts, the transaction is unreferenced twice, and commit_abort()
+	 * runs on half-initialized or already-cleaned job state.
+	 */
+	switch (bjob->job.status) {
+	case JOB_STATUS_RUNNING:
+	case JOB_STATUS_PAUSED:
+	case JOB_STATUS_READY:
+	case JOB_STATUS_STANDBY:
 		if (req->sync == false) {
 			job_cancel_locked(&bjob->job, false);
 		} else {
+			/*
+			 * The job may be dismissed and freed by the cancel, so
+			 * bjob must not be used afterwards.
+			 */
 			err = job_cancel_sync_locked(&bjob->job, false);
 		}
+		break;
+	case JOB_STATUS_CONCLUDED:
+		/* Already finished, nothing left to cancel. */
+		DPRINTF("Qcow2: job already concluded.\n");
+		break;
+	default:
+		/*
+		 * Mid-finalization. Do not report this as a successful cancel:
+		 * the job is about to complete, and telling the caller it was
+		 * cancelled would have it believe the chain was left alone.
+		 */
+		DPRINTF("Qcow2: not cancelling job in state '%s'.\n",
+			JobStatus_str(bjob->job.status));
+		err = -EBUSY;
+		break;
 	}
 	job_unlock();
 
@@ -1143,7 +1323,8 @@ do_cancel_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 signal:
 	pthread_mutex_lock(&s->commit_lock);
 	req->error = err;
-	pthread_cond_signal(&s->commit_cond);
+	req->done  = true;
+	pthread_cond_broadcast(&s->commit_cond);
 	pthread_mutex_unlock(&s->commit_lock);
 }
 
