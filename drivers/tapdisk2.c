@@ -31,6 +31,20 @@
 #include "tapdisk-control.h"
 #include "tapdisk-metrics.h"
 
+#ifdef HAVE_LTTNG
+# include <signal.h>
+# include <lttng/ust-version.h>
+# if LTTNG_UST_MAJOR_VERSION > 2 || \
+     (LTTNG_UST_MAJOR_VERSION == 2 && LTTNG_UST_MINOR_VERSION >= 13)
+#  include <lttng/ust-fork.h>
+# else
+#  include <lttng/ust.h>
+#  define lttng_ust_before_fork		ust_before_fork
+#  define lttng_ust_after_fork_child	ust_after_fork_child
+#  define lttng_ust_after_fork_parent	ust_after_fork_parent
+# endif
+#endif
+
 void tdnbd_fdreceiver_start();
 void tdnbd_fdreceiver_stop();
 
@@ -39,6 +53,34 @@ usage(const char *app, int err)
 {
 	fprintf(stderr, "usage: %s <-u uuid> <-c control socket>\n", app);
 	exit(err);
+}
+
+/*
+ * Tracing across a fork(2) without exec(3) requires the LTTng-UST handlers
+ * below, otherwise the child loses its tracing threads. Calling them here
+ * spares us from LD_PRELOADing liblttng-ust-fork.so. See lttng-ust(3),
+ * section "Using LTTng-UST with daemons".
+ */
+static int
+daemonize(int nochdir, int noclose)
+{
+#ifdef HAVE_LTTNG
+	sigset_t sigset;
+	int err;
+
+	lttng_ust_before_fork(&sigset);
+
+	err = daemon(nochdir, noclose);
+
+	if (err == 0)
+		lttng_ust_after_fork_child(&sigset);
+	else
+		lttng_ust_after_fork_parent(&sigset);
+
+	return err;
+#else
+	return daemon(nochdir, noclose);
+#endif
 }
 
 static FILE *
@@ -106,7 +148,7 @@ main(int argc, char *argv[])
 	}
 
 	if (!nodaemon) {
-		err = daemon(0, 0);
+		err = daemonize(0, 0);
 		if (err) {
 			DPRINTF("failed to daemonize: %d\n", errno);
 			goto out;
