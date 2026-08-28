@@ -82,7 +82,7 @@ tapdisk_xenblkif_reqs_pending(const struct td_xenblkif * const blkif)
 }
 
 void
-tapdisk_xenblkif_sched_chkrng(const struct td_xenblkif *blkif)
+tapdisk_xenblkif_sched_chkrng(struct td_xenblkif *blkif)
 {
 }
 

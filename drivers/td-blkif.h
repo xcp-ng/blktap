@@ -198,6 +198,27 @@ struct td_xenblkif {
 	event_id_t chkrng_event;
 	event_id_t stoppolling_event;
 
+	/**
+	 * Tells whether a ring check has been requested but not performed yet.
+	 *
+	 * When we give up on the ring with requests still in it (we stopped at a
+	 * barrier request, or we ran out of free request slots) we do not re-arm
+	 * the ring for front-end notifications, so the guest goes silent. The ring
+	 * check requested at that point is then the only thing that will bring us
+	 * back to the ring, and losing it stalls the ring for good.
+	 *
+	 * Completions may run in a driver thread (see TD_DRIVER_THREADED, e.g.
+	 * qcow2) and request a ring check while the main thread is unscheduling
+	 * one, so this flag records the request and keeps the unschedule from
+	 * cancelling a request it has not honoured.
+	 *
+	 * Accessed with __atomic_* (SEQ_CST), not under @mutex: what makes the
+	 * request safe is its ordering against the arming of the event, and
+	 * sched/unsched are called both with and without @mutex held.
+	 */
+	bool chkrng_pending;
+	pthread_mutex_t mutex_chkrng;
+
 	bool in_polling;
 	int poll_duration; /* microseconds; 0 means no polling. */
 	int poll_idle_threshold;
@@ -336,16 +357,19 @@ void
 tapdisk_start_polling(struct td_xenblkif *blkif);
 
 /**
- * Schedules a ring check.
+ * Schedules a ring check. Safe to call from any thread: the request is recorded
+ * in @blkif->chkrng_pending so that a concurrent
+ * tapdisk_xenblkif_unsched_chkrng() cannot cancel it.
  */
 void
-tapdisk_xenblkif_sched_chkrng(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_sched_chkrng(struct td_xenblkif *blkif);
 
 /**
- * Unschedules the ring check.
+ * Unschedules the ring check, unless a ring check has been requested and not
+ * honoured yet, in which case the event is left armed.
  */
 void
-tapdisk_xenblkif_unsched_chkrng(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_unsched_chkrng(struct td_xenblkif *blkif);
 
 /**
  * Tells whether a barrier request can be completed.
