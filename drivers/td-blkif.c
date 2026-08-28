@@ -265,6 +265,8 @@ tapdisk_xenblkif_destroy(struct td_xenblkif * blkif)
         err = 0;
     }
 
+    pthread_mutex_destroy(&blkif->mutex_chkrng);
+
     free(blkif);
 
     return err;
@@ -381,7 +383,17 @@ tapdisk_xenblkif_cb_stoppolling(event_id_t id __attribute__((unused)),
         /* If there were no new requests this time, then stop polling */
         blkif->in_polling = false;
 
-        /* Stop obsessively checking the ring */
+        /*
+         * Stop obsessively checking the ring.
+         *
+         * NB. we may get here with requests still in the ring, left behind an
+         * in-flight barrier request: process_ring() gives up on the ring while
+         * a barrier is armed, and does not re-arm front-end notifications. The
+         * ring check requested by the barrier's completion is then the only
+         * thing that will bring us back to the ring, and the driver thread may
+         * request it right here, between the process_ring() above and this
+         * line. tapdisk_xenblkif_unsched_chkrng() is careful not to cancel it.
+         */
         tapdisk_xenblkif_unsched_chkrng(blkif);
 
         /* Make the 'stop polling' event not fire again */
@@ -392,11 +404,16 @@ tapdisk_xenblkif_cb_stoppolling(event_id_t id __attribute__((unused)),
 }
 
 void
-tapdisk_xenblkif_sched_chkrng(const struct td_xenblkif *blkif)
+tapdisk_xenblkif_sched_chkrng(struct td_xenblkif *blkif)
 {
 	int err;
 
 	ASSERT(blkif);
+
+	/* Raise before arming */
+	pthread_mutex_lock(&blkif->mutex_chkrng);
+	blkif->chkrng_pending = true;
+	pthread_mutex_unlock(&blkif->mutex_chkrng);
 
 	err = tapdisk_server_event_set_timeout(
 			tapdisk_xenblkif_chkrng_event_id(blkif), TV_ZERO);
@@ -404,15 +421,23 @@ tapdisk_xenblkif_sched_chkrng(const struct td_xenblkif *blkif)
 }
 
 void
-tapdisk_xenblkif_unsched_chkrng(const struct td_xenblkif *blkif)
+tapdisk_xenblkif_unsched_chkrng(struct td_xenblkif *blkif)
 {
 	int err;
 
 	ASSERT(blkif);
 
-	err = tapdisk_server_event_set_timeout(
-			tapdisk_xenblkif_chkrng_event_id(blkif), TV_INF);
-	ASSERT(!err);
+	/*
+         * A driver thread may have requested a ring check, do not disarm the
+         * event. That request may be the only one this ring will ever get.
+	 */
+	pthread_mutex_lock(&blkif->mutex_chkrng);
+	if (likely(!blkif->chkrng_pending)) {
+		err = tapdisk_server_event_set_timeout(
+				tapdisk_xenblkif_chkrng_event_id(blkif), TV_INF);
+		ASSERT(!err);
+	}
+	pthread_mutex_unlock(&blkif->mutex_chkrng);
 }
 
 static inline void
@@ -422,6 +447,11 @@ tapdisk_xenblkif_cb_chkrng(event_id_t id __attribute__((unused)),
     struct td_xenblkif *blkif = private;
 
     ASSERT(blkif);
+
+    /* We are about to look at the ring, acknowledge chkrng */
+    pthread_mutex_lock(&blkif->mutex_chkrng);
+    blkif->chkrng_pending = false;
+    pthread_mutex_unlock(&blkif->mutex_chkrng);
 
     /*
      * If we are polling, process the ring without setting the event counter.
@@ -486,6 +516,8 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
 	td_blkif->barrier.msg = NULL;
 	td_blkif->barrier.io_done = false;
 	td_blkif->barrier.io_err = 0;
+    td_blkif->chkrng_pending = false;
+    pthread_mutex_init(&td_blkif->mutex_chkrng, NULL);
 
     td_blkif->xenvbd_stats.root = NULL;
     shm_init(&td_blkif->xenvbd_stats.io_ring);
