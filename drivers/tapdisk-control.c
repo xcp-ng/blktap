@@ -846,6 +846,8 @@ out:
         response->u.image.sectors = vbd->disk_info.size;
         response->u.image.sector_size = vbd->disk_info.sector_size;
         response->u.image.info = vbd->disk_info.info;
+        response->u.image.discard = vbd->disk_info.discard;
+        response->u.image.discard_granularity = vbd->disk_info.discard_granularity;
         response->type = TAPDISK_MESSAGE_OPEN_RSP;
 		return td_err_set_success(error);
 	}
@@ -1236,11 +1238,20 @@ tapdisk_control_xenblkif_connect(
     } else
         pool_name = blkif->pool_name;
 
-    DPRINTF("connecting VBD %d domid=%d, devid=%d, pool %s, evt %d, poll duration %d, poll idle threshold %d\n",
-            vbd->uuid, blkif->domid, blkif->devid, pool_name, blkif->port, blkif->poll_duration, blkif->poll_idle_threshold);
+    DPRINTF("connecting VBD %d domid=%d, devid=%d, queues=%d,"
+	    " persistent-grants=%s,"
+	    " indirect-segs=%s (max %d),"
+	    " pool %s, evt %d, poll duration %d, poll idle threshold %d\n",
+	    vbd->uuid, blkif->domid, blkif->devid, blkif->nr_queues,
+	    blkif->persistent_grants ? "yes":"no",
+	    blkif->indirect_max_segments ? "enabled":"disabled", blkif->indirect_max_segments,
+	    pool_name, blkif->ports[0], blkif->poll_duration, blkif->poll_idle_threshold);
 
-    err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid, blkif->gref,
-            blkif->order, blkif->port, blkif->proto, blkif->poll_duration, blkif->poll_idle_threshold, pool_name, vbd);
+    err = tapdisk_xenblkif_connect(blkif->domid, blkif->devid, &blkif->gref[0][0],
+				blkif->order, blkif->ports[0], blkif->persistent_grants,
+				blkif->indirect_max_segments,
+				blkif->proto, blkif->poll_duration, blkif->poll_idle_threshold,
+				pool_name, vbd);
 
 out:
 	response->cookie = request->cookie;
@@ -1302,17 +1313,21 @@ tapdisk_control_disk_info(
     if (!vbd) {
         err = -ENODEV;
         goto out;
-	}
+    }
 
-    DPRINTF("VBD %d got disk info: sectors=%llu sector size=%ld, info=%d\n",
+    DPRINTF("VBD %d got disk info: sectors=%llu sector size=%ld, info=%d, discard=%s, discard granularity=%ld\n",
             vbd->uuid, (unsigned long long)vbd->disk_info.size,
-            vbd->disk_info.sector_size, vbd->disk_info.info);
+            vbd->disk_info.sector_size, vbd->disk_info.info,
+            vbd->disk_info.discard ? "true" : "false",
+            vbd->disk_info.discard_granularity);
 out:
     if (!err) {
         response->type = TAPDISK_MESSAGE_DISK_INFO_RSP;
         image->sectors = vbd->disk_info.size;
         image->sector_size = vbd->disk_info.sector_size;
         image->info = vbd->disk_info.info;
+        image->discard = vbd->disk_info.discard;
+        image->discard_granularity = vbd->disk_info.discard_granularity;
     }
     return td_err_set_errno(error, err);
 }

@@ -326,8 +326,10 @@ physical_device_path_changed(vbd_t *device) {
 	 * get the VBD parameters from the tapdisk
 	 */
 	if ((err = tap_ctl_info(device->tap->pid, &device->sectors,
-					&device->sector_size, &device->info,
-					device->minor))) {
+				&device->sector_size, &device->info,
+				&device->max_queues,
+				&device->discard, &device->discard_granularity,
+				device->minor))) {
 		WARN(device, "error retrieving disk characteristics: %s\n",
 		     strerror(-err));
 		goto out;
@@ -365,6 +367,8 @@ out:
 		free(device->tap);
 		device->tap = NULL;
 		device->sector_size = device->sectors = device->info = 0;
+		device->discard = false;
+		device->discard_granularity = 0;
 	}
 	free(s);
 done:
@@ -485,6 +489,8 @@ physical_device_changed(vbd_t *device) {
      */
     if ((err = tap_ctl_info(device->tap->pid, &device->sectors,
                     &device->sector_size, &info,
+                    &device->max_queues,
+                    &device->discard, &device->discard_granularity,
                     device->minor))) {
         WARN(device, "error retrieving disk characteristics: %s\n",
                 strerror(-err));
@@ -522,6 +528,8 @@ out:
         free(device->tap);
         device->tap = NULL;
         device->sector_size = device->sectors = device->info = 0;
+        device->discard = false;
+        device->discard_granularity = 0;
     }
     free(s);
     return err;

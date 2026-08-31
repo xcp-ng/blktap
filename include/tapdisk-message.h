@@ -19,9 +19,11 @@
 #define _TAPDISK_MESSAGE_H_
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <sys/types.h>
 
 #include "xen_blkif.h"
+#include "tapdisk-common.h"
 
 /*
  * TODO This is quite small since we don't allow path bigger than 256 chars. If
@@ -72,6 +74,9 @@ struct tapdisk_message_image {
 	uint64_t                         sectors;
 	uint32_t                         sector_size;
 	uint32_t                         info;
+	uint32_t                         max_queues;
+	bool                             discard;
+	uint32_t                         discard_granularity;
 };
 
 struct tapdisk_message_string {
@@ -123,13 +128,22 @@ typedef struct tapdisk_message_blkif {
 	uint32_t devid;
 
 	/**
-	 * Grant references for the shared ring.
-	 * See order below to know the number of used refs in this array.
+	 * Number of queues
 	 */
-	uint32_t gref[MAX_RING_PAGES];
+	uint32_t nr_queues;
 
 	/**
-	 * Number of pages in the ring, expressed as a page order.
+	 * Grant references for the shared ring.
+	 */
+	grant_ref_t gref[BLKIF_MAX_QUEUES][MAX_RING_PAGES];
+
+	/**
+	 * The event channel port.
+	 */
+	uint32_t ports[BLKIF_MAX_QUEUES];
+
+	/**
+	 * Number of pages in rings, expressed as a page order.
 	 */
 	uint32_t order;
 
@@ -145,11 +159,6 @@ typedef struct tapdisk_message_blkif {
 	char pool_name[TAPDISK_MESSAGE_STRING_LENGTH];
 
 	/**
-	 * The event channel port.
-	 */
-	uint32_t port;
-
-	/**
 	 * Polling duration in microseconds. 0 means no polling.
 	 */
 	uint32_t poll_duration;
@@ -158,6 +167,16 @@ typedef struct tapdisk_message_blkif {
 	 * Idle CPU threshold above which polling is permitted.
 	 */
 	uint32_t poll_idle_threshold;
+
+	/**
+	 * Persistent grants feature enabled.
+	 */
+	bool persistent_grants;
+
+	/**
+	 * Maximum number of segments per page in indirect requests.
+	 */
+	uint32_t indirect_max_segments;
 } tapdisk_message_blkif_t;
 
 /**
