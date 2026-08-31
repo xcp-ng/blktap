@@ -38,6 +38,8 @@
 #include <errno.h>
 #include <sys/socket.h>
 
+#include <cmocka-compat.h>
+
 #include "control-wrappers.h"
 
 static int enable_mocks = 0;
@@ -66,8 +68,8 @@ __wrap_ioctl(int fd, int request, ...)
 {
 	int result;
 
-	check_expected(fd);
-	check_expected(request);
+	check_expected_int(fd);
+	check_expected_int(request);
 
 	result = (int)mock();
 
@@ -88,7 +90,7 @@ __wrap_open(const char *pathname, int flags)
 	int result;
 
 	if (enable_mocks) {
-		check_expected(pathname);
+		check_expected_ptr(pathname);
 		result = mock();
 		if (result == -1)
 			errno = ENOENT;
@@ -106,7 +108,7 @@ __wrap_close(int fd)
 {
 	int result;
 
-	check_expected(fd);
+	check_expected_int(fd);
 	result = mock();
 	if (result != 0)
 	{
@@ -125,7 +127,7 @@ __wrap_access(const char *pathname, int mode)
 	int result;
 
 	if (enable_mocks) {
-		check_expected(pathname);
+		check_expected_ptr(pathname);
 
 		result = mock();
 		if (result != 0) {
@@ -143,7 +145,7 @@ __wrap_read(int fd, void *buf, size_t count)
 	int result = -1;
 	struct mock_read_params *params;
 
-	check_expected(fd);
+	check_expected_int(fd);
 	params = (struct mock_read_params *)mock();
 
 	if (params->result > 0) {
@@ -171,8 +173,8 @@ __wrap_write(int fd, const void *buf, size_t count)
 {
 	int result;
 
-	check_expected(fd);
-	check_expected(buf);
+	check_expected_int(fd);
+	check_expected_ptr(buf);
 	result = mock();
 
 	if (result > (int)count)
@@ -188,8 +190,8 @@ int
 __wrap_connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
 	int result;
-	check_expected(sockfd);
-	check_expected(addr);
+	check_expected_int(sockfd);
+	check_expected_ptr(addr);
 	result = mock();
 	if (result) {
 		errno = result;
@@ -203,7 +205,7 @@ __wrap_select(int nfds, fd_set *readfds, fd_set *writefds,
 	      fd_set *exceptfds, struct timeval *timeout)
 {
 	struct mock_select_params *params;
-	check_expected(timeout);
+	check_expected_ptr(timeout);
 	params = (struct mock_select_params *)mock();
 	if (readfds)
 		memcpy(readfds, &params->readfds, sizeof(fd_set));
@@ -222,7 +224,7 @@ __wrap_mkdir(const char *pathname, mode_t mode)
 {
 	int result;
 	if (enable_mocks) {
-		check_expected(pathname);
+		check_expected_ptr(pathname);
 		result = mock();
 		if (result != 0){
 			errno = result;
@@ -237,7 +239,7 @@ int
 __wrap_flock(int fd, int operation)
 {
 	int result;
-	check_expected(fd);
+	check_expected_int(fd);
 	result = mock();
 	if (result != 0) {
 		errno = result;
@@ -246,11 +248,25 @@ __wrap_flock(int fd, int operation)
 	return result;
 }
 
+/*
+ * Prior to glibc 2.33, mknod(3) was an inline wrapper in <sys/stat.h>
+ * that forwarded to the exported __xmknod() symbol.
+ * Since glibc 2.33, mknod() is exported directly so we have to wrap
+ * mknod() instead.
+ *
+ * Compiler flags (-fno-inline, -Og) and glibc version both influence
+ * which symbol the call site actually references, so we define both
+ * wrappers unconditionally.
+ */
 int
-__wrap___xmknod(int ver, const char *pathname, mode_t mode, dev_t * dev)
+__wrap_mknod(const char *pathname, mode_t mode, dev_t dev)
 {
 	int result;
-	check_expected(pathname);
+
+	(void)mode;
+	(void)dev;
+
+	check_expected_ptr(pathname);
 	result = mock();
 	if (result != 0)
 	{
@@ -261,10 +277,20 @@ __wrap___xmknod(int ver, const char *pathname, mode_t mode, dev_t * dev)
 }
 
 int
+__wrap___xmknod(int ver, const char *pathname, mode_t mode, dev_t *dev)
+{
+	(void)ver;
+	(void)mode;
+	(void)dev;
+
+	return __wrap_mknod(pathname, mode, (dev_t)(dev ? *dev : 0));
+}
+
+int
 __wrap_unlink(const char *pathname)
 {
 	int result;
-	check_expected(pathname);
+	check_expected_ptr(pathname);
 	result = mock();
 	if (result != 0)
 	{
@@ -279,9 +305,9 @@ __wrap_socket(int domain, int type, int protocol)
 {
 	int result;
 
-	check_expected(domain);
-	check_expected(type);
-	check_expected(protocol);
+	check_expected_int(domain);
+	check_expected_int(type);
+	check_expected_int(protocol);
 
 	result = mock();
 
@@ -297,7 +323,7 @@ __wrap_glob(const char *pattern, int flags,
 	    int (*errfunc) (const char *epath, int eerrno),
 	    glob_t *pglob)
 {
-	check_expected(pattern);
+	check_expected_ptr(pattern);
 	int result = mock();
 	if (result == 0)
 	{

@@ -33,6 +33,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 
 #include <string.h>
@@ -71,29 +72,29 @@ void test_tap_ctl_close_success(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, 0);
 
 	write_select_params.result = 1;
 	FD_SET(ipc_socket, &write_select_params.writefds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &write_select_params);
 
 	write_message.type = TAPDISK_MESSAGE_CLOSE;
 	write_message.cookie = test_minor;
-	expect_value(__wrap_write, fd, ipc_socket);
+	expect_int_value(__wrap_write, fd, ipc_socket);
 	expect_memory(__wrap_write, buf, &write_message, sizeof(write_message));
 	will_return(__wrap_write, 1024);
 
 	read_select_params.result = 1;
 	FD_SET(ipc_socket, &read_select_params.readfds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &read_select_params);
 
 	read_message.type = TAPDISK_MESSAGE_CLOSE_RSP;
@@ -101,10 +102,10 @@ void test_tap_ctl_close_success(void **state)
 	read_message.u.response.error = 0;
 	read_params.result = sizeof(read_message);
 	read_params.data = &read_message;
-	expect_value(__wrap_read, fd, ipc_socket);
+	expect_int_value(__wrap_read, fd, ipc_socket);
 	will_return(__wrap_read, &read_params);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
@@ -136,29 +137,29 @@ void test_tap_ctl_force_close_success(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, 0);
 
 	write_select_params.result = 1;
 	FD_SET(ipc_socket, &write_select_params.writefds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &write_select_params);
 
 	write_message.type = TAPDISK_MESSAGE_FORCE_SHUTDOWN;
 	write_message.cookie = test_minor;
-	expect_value(__wrap_write, fd, ipc_socket);
+	expect_int_value(__wrap_write, fd, ipc_socket);
 	expect_memory(__wrap_write, buf, &write_message, sizeof(write_message));
 	will_return(__wrap_write, 1024);
 
 	read_select_params.result = 1;
 	FD_SET(ipc_socket, &read_select_params.readfds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &read_select_params);
 
 	read_message.type = TAPDISK_MESSAGE_CLOSE_RSP;
@@ -166,10 +167,10 @@ void test_tap_ctl_force_close_success(void **state)
 	read_message.u.response.error = 0;
 	read_params.result = sizeof(read_message);
 	read_params.data = &read_message;
-	expect_value(__wrap_read, fd, ipc_socket);
+	expect_int_value(__wrap_read, fd, ipc_socket);
 	will_return(__wrap_read, &read_params);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
@@ -191,16 +192,16 @@ void test_tap_ctl_close_connect_fail(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, ENOENT);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
@@ -227,25 +228,25 @@ void test_tap_ctl_close_write_error(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, 0);
 
 	write_select_params.result = 1;
 	FD_SET(ipc_socket, &write_select_params.writefds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &write_select_params);
 
-	expect_value(__wrap_write, fd, ipc_socket);
+	expect_int_value(__wrap_write, fd, ipc_socket);
 	expect_any(__wrap_write, buf);
 	will_return(__wrap_write, -EIO);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
@@ -275,37 +276,37 @@ void test_tap_ctl_close_read_error(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, 0);
 
 	write_select_params.result = 1;
 	FD_SET(ipc_socket, &write_select_params.writefds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &write_select_params);
 
 	write_message.type = TAPDISK_MESSAGE_CLOSE;
 	write_message.cookie = test_minor;
-	expect_value(__wrap_write, fd, ipc_socket);
+	expect_int_value(__wrap_write, fd, ipc_socket);
 	expect_memory(__wrap_write, buf, &write_message, sizeof(write_message));
 	will_return(__wrap_write, 1024);
 
 	read_select_params.result = 1;
 	FD_SET(ipc_socket, &read_select_params.readfds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &read_select_params);
 
 	read_params.result = -EIO;
 	read_params.data = NULL;
-	expect_value(__wrap_read, fd, ipc_socket);
+	expect_int_value(__wrap_read, fd, ipc_socket);
 	will_return(__wrap_read, &read_params);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
@@ -333,12 +334,12 @@ void test_tap_ctl_close_write_select_timeout(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, 0);
 
@@ -348,7 +349,7 @@ void test_tap_ctl_close_write_select_timeout(void **state)
 	expect_memory(__wrap_select, timeout, &write_timeout, sizeof(write_timeout));
 	will_return(__wrap_select, &write_select_params);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
@@ -379,12 +380,12 @@ void test_tap_ctl_close_read_select_timeout(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, 0);
 
@@ -397,7 +398,7 @@ void test_tap_ctl_close_read_select_timeout(void **state)
 
 	write_message.type = TAPDISK_MESSAGE_CLOSE;
 	write_message.cookie = test_minor;
-	expect_value(__wrap_write, fd, ipc_socket);
+	expect_int_value(__wrap_write, fd, ipc_socket);
 	expect_memory(__wrap_write, buf, &write_message, sizeof(write_message));
 	will_return(__wrap_write, 1024);
 
@@ -407,7 +408,7 @@ void test_tap_ctl_close_read_select_timeout(void **state)
 	expect_memory(__wrap_select, timeout, &read_timeout, sizeof(read_timeout));
 	will_return(__wrap_select, &read_select_params);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
@@ -439,29 +440,29 @@ void test_tap_ctl_close_error_response(void **state)
 	saddr.sun_family = AF_UNIX;
 	strcpy(saddr.sun_path, expected_sock_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket);
 	expect_memory(__wrap_connect, addr, &saddr, sizeof(saddr));
 	will_return(__wrap_connect, 0);
 
 	write_select_params.result = 1;
 	FD_SET(ipc_socket, &write_select_params.writefds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &write_select_params);
 
 	write_message.type = TAPDISK_MESSAGE_CLOSE;
 	write_message.cookie = test_minor;
-	expect_value(__wrap_write, fd, ipc_socket);
+	expect_int_value(__wrap_write, fd, ipc_socket);
 	expect_memory(__wrap_write, buf, &write_message, sizeof(write_message));
 	will_return(__wrap_write, 1024);
 
 	read_select_params.result = 1;
 	FD_SET(ipc_socket, &read_select_params.readfds);
-	expect_value(__wrap_select, timeout, NULL);
+	expect_ptr_value(__wrap_select, timeout, NULL);
 	will_return(__wrap_select, &read_select_params);
 
 	read_message.type = TAPDISK_MESSAGE_ERROR;
@@ -469,10 +470,10 @@ void test_tap_ctl_close_error_response(void **state)
 	read_message.u.response.error = ENOENT;
 	read_params.result = sizeof(read_message);
 	read_params.data = &read_message;
-	expect_value(__wrap_read, fd, ipc_socket);
+	expect_int_value(__wrap_read, fd, ipc_socket);
 	will_return(__wrap_read, &read_params);
 
-	expect_value(__wrap_close, fd, ipc_socket);
+	expect_int_value(__wrap_close, fd, ipc_socket);
 	will_return(__wrap_close, 0);
 
 	/* Call test API */
