@@ -202,7 +202,7 @@ tapback_backend_create_device(backend_t *backend,
     vbd_t *device = NULL;
     int err = 0;
 
-	ASSERT(backend);
+    ASSERT(backend);
     ASSERT(name);
 
     DBG(NULL, "%s creating device\n", name);
@@ -213,7 +213,7 @@ tapback_backend_create_device(backend_t *backend,
         goto out;
     }
 
-	device->backend = backend;
+    device->backend = backend;
     list_add_tail(&device->backend_entry,
             &device->backend->slave.slave.devices);
 
@@ -498,7 +498,7 @@ physical_device_changed(vbd_t *device) {
     }
 
     /* Enable multi-queue */
-    if (device->max_queues > 1) {
+    if (device->backend->multiqueue &&	device->max_queues > 1) {
 	if ((err = tapback_device_printf(device, XBT_NULL, "multi-queue-max-queues", true, "%d",
 					 device->max_queues))) {
 	    WARN(device, "failed to write multi-queue-max-queues: %s\n", strerror(-err));
@@ -823,7 +823,7 @@ tapback_backend_probe_device(backend_t *backend,
     vbd_t *device = NULL;
     char * s = NULL;
 
-	ASSERT(backend);
+    ASSERT(backend);
     ASSERT(devname);
 
     ASSERT(!tapback_is_master(backend));
@@ -1217,8 +1217,8 @@ tapback_backend_handle_backend_watch(backend_t *backend,
                 }
                 if (log_level == LOG_DEBUG)
                     args[i++] = "-v";
-				if (!backend->barrier)
-					args[i++] = "-b";
+		if (!backend->barrier)
+		    args[i++] = "-b";
                 args[i] = NULL;
                 /*
                  * TODO we're hard-coding the name of the binary, better let

@@ -194,15 +194,20 @@ typedef struct backend {
 
     char *pidfile;
 
-	/**
-	 * Tells whether we support write I/O barriers.
-	 */
-	bool barrier;
+    /**
+     * Tells whether we support write I/O barriers.
+     */
+    bool barrier;
 
-	/**
-	 * Tells whether we support discard.
-	 */
-	bool discard;
+    /**
+     * Tells whether we support multi-queue.
+     */
+    bool multiqueue;
+
+    /**
+     * Tells whether we support discard.
+     */
+    bool discard;
 } backend_t;
 
 /**
