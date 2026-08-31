@@ -80,7 +80,7 @@ struct tio {
 	const char           *name;
 	size_t                data_size;
 
-	int  (*tio_setup)    (libaio_queue *queue, int qlen);
+	int  (*tio_setup)    (libaio_queue *queue, int qlen, int qid);
 	void (*tio_destroy)  (libaio_queue *queue);
 	int  (*tio_submit)   (libaio_queue *queue);
 };
@@ -221,6 +221,7 @@ struct lio {
 	int              event_id;
 
 	int              flags;
+	int              qid;
 };
 
 #define LIO_FLAG_EVENTFD        (1<<0)
@@ -345,7 +346,7 @@ libaio_backend_lio_destroy(libaio_queue *queue)
 		return;
 
 	if (lio->event_id >= 0) {
-		tapdisk_server_unregister_event(lio->event_id);
+		tapdisk_server_unregister_io_event(lio->qid, lio->event_id);
 		lio->event_id = -1;
 	}
 
@@ -419,19 +420,21 @@ libaio_backend_lio_event(event_id_t id, char mode, void *private)
 }
 
 static int
-libaio_backend_lio_setup(libaio_queue *queue, int qlen)
+libaio_backend_lio_setup(libaio_queue *queue, int qlen, int qid)
 {
 	struct lio *lio = queue->tio_data;
 	int err;
 
 	lio->event_id = -1;
+	lio->qid = qid;
 
 	err = libaio_backend_lio_setup_aio(queue, qlen);
 	if (err)
 		goto fail;
 
 	lio->event_id =
-		tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
+		tapdisk_server_register_io_event(qid,
+					      SCHEDULER_POLL_READ_FD,
 					      lio->event_fd, TV_ZERO,
 					      libaio_backend_lio_event,
 					      queue);
@@ -509,7 +512,7 @@ libaio_backend_queue_free_io(libaio_queue *queue)
 }
 
 static int
-libaio_backend_queue_init_io(libaio_queue *queue, int drv)
+libaio_backend_queue_init_io(libaio_queue *queue, int drv, int qid)
 {
 	const struct tio *tio;
 	int err;
@@ -533,7 +536,7 @@ libaio_backend_queue_init_io(libaio_queue *queue, int drv)
 	queue->tio = tio;
 
 	if (tio->tio_setup) {
-		err = tio->tio_setup(queue, queue->size);
+		err = tio->tio_setup(queue, queue->size, qid);
 		if (err)
 			goto fail;
 	}
@@ -565,7 +568,7 @@ libaio_backend_free_queue(tqueue *q)
 
 static int
 libaio_backend_init_queue(tqueue *q, int size,
-	int drv, struct tfilter *filter)
+	int drv, struct tfilter *filter, int qid)
 {
 
 	int err;
@@ -583,7 +586,7 @@ libaio_backend_init_queue(tqueue *q, int size,
 	if (!size)
 		return 0;
 
-	err = libaio_backend_queue_init_io(queue, drv);
+	err = libaio_backend_queue_init_io(queue, drv, qid);
 	if (err)
 		goto fail;
 

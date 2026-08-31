@@ -73,7 +73,13 @@ test_vbd_issue_request(void **stat)
 	td_vbd_t vbd;
 	bzero(&vbd, sizeof(td_vbd_t));
 	INIT_LIST_HEAD(&vbd.images);
-	INIT_LIST_HEAD(&vbd.pending_requests);
+	td_vbd_queue_t *queue = &vbd.queues[0];
+	queue->vbd = &vbd;
+	INIT_LIST_HEAD(&queue->new_requests);
+	INIT_LIST_HEAD(&queue->pending_requests);
+	INIT_LIST_HEAD(&queue->failed_requests);
+	INIT_LIST_HEAD(&queue->completed_requests);
+	pthread_mutex_init(&queue->mutex, NULL);
 	td_image_t *image = tapdisk_image_allocate("blah", DISK_TYPE_VHD, TD_OPEN_RDONLY | TD_OPEN_SHAREABLE);
 	list_add_tail(&image->next, &vbd.images);
 
@@ -98,11 +104,11 @@ test_vbd_issue_request(void **stat)
 	my_treq.vreq           = &vreq;
 	my_treq.op = TD_OP_BLOCK_STATUS;
 	my_treq.cb = tapdisk_vbd_complete_block_status_request;
-	
+
 	expect_memory(__wrap_td_queue_block_status, treq, &my_treq, sizeof(my_treq));
-	
+
 	will_return(__wrap_tapdisk_image_check_request, 0);
-	int err = tapdisk_vbd_issue_request(&vbd, &vreq);
+	int err = tapdisk_vbd_issue_request(queue, &vreq);
 	assert_int_equal(err, 0);
 	tapdisk_image_free(image);
 }
@@ -114,17 +120,23 @@ test_vbd_complete_block_status_request(void **stat)
 	td_vbd_t vbd;
 	bzero(&vbd, sizeof(td_vbd_t));
 	INIT_LIST_HEAD(&vbd.images);
-	INIT_LIST_HEAD(&vbd.pending_requests);
+	td_vbd_queue_t *queue = &vbd.queues[0];
+	queue->vbd = &vbd;
+	INIT_LIST_HEAD(&queue->new_requests);
+	INIT_LIST_HEAD(&queue->pending_requests);
+	INIT_LIST_HEAD(&queue->failed_requests);
+	INIT_LIST_HEAD(&queue->completed_requests);
+	pthread_mutex_init(&queue->mutex, NULL);
 	td_image_t *image = tapdisk_image_allocate("blah", DISK_TYPE_VHD, TD_OPEN_RDONLY | TD_OPEN_SHAREABLE);
 	list_add_tail(&image->next, &vbd.images);
 
 	tapdisk_extents_t *extents = malloc(sizeof(*extents));
 	bzero(extents, sizeof(*extents));
-	
+
 	td_vbd_request_t vreq;
 	bzero(&vreq, sizeof(td_vbd_request_t));
 	INIT_LIST_HEAD(&vreq.next);
-	vreq.vbd = &vbd;
+	vreq.vqueue = queue;
 	vreq.iovcnt = 1;
 	struct td_iovec iov;
 	iov.base = 0;

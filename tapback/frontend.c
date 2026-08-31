@@ -24,6 +24,10 @@
 
 #include <xen/io/protocols.h>
 #include "xen_blkif.h"
+#include "tapdisk-common.h"
+
+#define MAX(a, b)       ((a) > (b) ? (a) : (b))
+
 
 /**
  * Switches the back-end state of the device by writing to XenStore.
@@ -57,6 +61,78 @@ xenbus_switch_state(vbd_t * const device,
     return err;
 }
 
+static inline int
+xenbus_read_queue_params(vbd_t * const device, const char* root,
+                     const int order,
+                     evtchn_port_t* port,
+                     grant_ref_t grefs[MAX_RING_PAGES])
+{
+    int err = 0;
+    int nr_pages = 1 << order;
+    size_t len;
+    char* path;
+    char* sep = root[0] ? "/" : "" ;
+
+    /*
+     * +10 is for INT_MAX, +1 for NULL termination
+     */
+    len = strlen(root) + MAX(sizeof(RING_REF), sizeof(EVENT_CHANNEL)) + 10 + 1 + 1;
+    path = alloca(len);
+
+    /*
+     * Read the grant references.
+     */
+    if (order) {
+        int i = 0;
+
+        /* TODO: support order > 0 */
+        for (i = 0; i < nr_pages; i++) {
+            if (snprintf(path, len, "%s%s%s%d", root, sep, RING_REF, i) >= (int)len) {
+                DBG(device, "error printing to buffer\n");
+                err = EINVAL;
+                goto out;
+            }
+            if (1 != tapback_device_scanf_otherend(device, XBT_NULL, path,
+                        "%u", &grefs[i])) {
+                WARN(device, "failed to read grant ref 0x%x\n", i);
+                err = ENOENT;
+                goto out;
+            }
+        }
+    } else {
+        if (snprintf(path, len, "%s%s%s", root, sep, RING_REF) >= (int)len) {
+            DBG(device, "error printing to buffer\n");
+            err = EINVAL;
+            goto out;
+        }
+        if (1 != tapback_device_scanf_otherend(device, XBT_NULL, path,
+                    "%u", &grefs[0])) {
+            WARN(device, "failed to read grant ref\n");
+            err = ENOENT;
+            goto out;
+        }
+    }
+
+    /*
+     * Read the event channel.
+     */
+    if (snprintf(path, len, "%s%s%s", root, sep, EVENT_CHANNEL) >= (int)len) {
+        DBG(device, "error printing to buffer\n");
+        err = EINVAL;
+        goto out;
+    }
+    if (1 != tapback_device_scanf_otherend(device, XBT_NULL, path,
+                "%u", port)) {
+        WARN(device, "failed to read event channel\n");
+        err = ENOENT;
+        goto out;
+    }
+
+out:
+    return err;
+}
+
+
 /**
  * Core functions that instructs the tapdisk to connect to the shared ring (if
  * not already connected).
@@ -73,12 +149,12 @@ xenbus_switch_state(vbd_t * const device,
 static inline int
 connect_tap(vbd_t * const device)
 {
-    evtchn_port_t port = 0;
-    grant_ref_t *gref = NULL;
+    grant_ref_t (*grefs)[MAX_RING_PAGES] = NULL;
+    evtchn_port_t ports[BLKIF_MAX_QUEUES];
     int err = 0;
     char *proto_str = NULL;
     char *persistent_grants_str = NULL;
-    int nr_pages = 0, proto = 0, order = 0;
+    int proto = 0, order = 0, nr_queues = 0;
     bool persistent_grants = false;
 
     ASSERT(device);
@@ -108,55 +184,42 @@ connect_tap(vbd_t * const device)
                 "%d", &order))
         order = 0;
 
-     nr_pages = 1 << order;
+    /*
+     * Read queues and grant references
+     */
+    if (1 != tapback_device_scanf_otherend(device, XBT_NULL, "multi-queue-num-queues",
+                "%d", &nr_queues))
+        nr_queues = 1;
 
-    if (!(gref = calloc(nr_pages, sizeof(grant_ref_t)))) {
+    if (nr_queues < 0 || nr_queues > BLKIF_MAX_QUEUES) {
+        WARN(device, "invalid number of queues %d.\n", nr_queues);
+        err = EINVAL;
+        goto out;
+    }
+
+    if (!(grefs = calloc(nr_queues, sizeof(grant_ref_t[MAX_RING_PAGES])))) {
         WARN(device, "failed to allocate memory for grant refs.\n");
         err = ENOMEM;
         goto out;
     }
 
-    /*
-     * Read the grant references.
-     */
-    if (order) {
-        int i = 0;
-        /*
-         * +10 is for INT_MAX, +1 for NULL termination
-         */
-
-        static const size_t len = sizeof(RING_REF) + 10 + 1;
-        char ring_ref[len];
-        for (i = 0; i < nr_pages; i++) {
-            if (snprintf(ring_ref, len, "%s%d", RING_REF, i) >= (int)len) {
-                DBG(device, "error printing to buffer\n");
-                err = EINVAL;
-                goto out;
-            }
-            if (1 != tapback_device_scanf_otherend(device, XBT_NULL, ring_ref,
-                        "%u", &gref[i])) {
-                WARN(device, "failed to read grant ref 0x%x\n", i);
-                err = ENOENT;
-                goto out;
-            }
-        }
-    } else {
-        if (1 != tapback_device_scanf_otherend(device, XBT_NULL, RING_REF,
-                    "%u", &gref[0])) {
-            WARN(device, "failed to read grant ref\n");
-            err = ENOENT;
-            goto out;
-        }
+    if (nr_queues == 1) {
+        xenbus_read_queue_params(device, "", order, &ports[0], &grefs[0][0]);
     }
+    else {
+        char path[9]; /* queue-NN */
+        int i;
 
-    /*
-     * Read the event channel.
-     */
-    if (1 != tapback_device_scanf_otherend(device, XBT_NULL, EVENT_CHANNEL,
-                "%u", &port)) {
-        WARN(device, "failed to read event channel\n");
-        err = ENOENT;
-        goto out;
+        for (i = 0; i < nr_queues; i++) {
+            if (snprintf(path, sizeof(path), "queue-%d", i) >= (int)sizeof(path)) {
+                err = ENOMEM;
+                goto out;
+            }
+
+            err = xenbus_read_queue_params(device, path, order, &ports[i], &grefs[i][0]);
+            if (err)
+                goto out;
+        }
     }
 
     /*
@@ -209,7 +272,7 @@ connect_tap(vbd_t * const device)
      */
     if ((err = -tap_ctl_connect_xenblkif(device->tap->pid, device->domid,
                     device->devid, device->polling_duration, device->polling_idle_threshold,
-		    gref, order, port, proto, NULL,
+                    grefs, order, nr_queues, ports, proto, NULL,
                     device->minor))) {
         /*
          * This happens if the tapback dameon gets restarted while there are
@@ -243,7 +306,7 @@ out:
         device->connected = false;
     }
 
-    free(gref);
+    free(grefs);
     free(proto_str);
     free(persistent_grants_str);
 
@@ -278,9 +341,9 @@ connect_frontend(vbd_t *device) {
          */
 
         /*
-		 * Write the number of sectors, sector size, info, and barrier support
-		 * to the back-end path in XenStore so that the front-end creates a VBD
-		 * with the appropriate characteristics.
+         * Write the number of sectors, sector size, info, and barrier support
+         * to the back-end path in XenStore so that the front-end creates a VBD
+         * with the appropriate characteristics.
          */
         if ((err = tapback_device_printf(device, xst, "feature-barrier", true,
                         "%d", device->backend->barrier ? 1 : 0))) {
@@ -307,7 +370,7 @@ connect_frontend(vbd_t *device) {
             break;
         }
 
-		abort_transaction = false;
+        abort_transaction = false;
         if (!xs_transaction_end(device->backend->xs, xst, 0)) {
             err = -errno;
             ASSERT(err);
@@ -424,12 +487,12 @@ frontend_changed(vbd_t * const device, const XenbusState state)
     int err = 0;
 
     DBG(device, "front-end switched to state %s\n", xenbus_strstate(state));
-	device->frontend_state = state;
+    device->frontend_state = state;
 
     switch (state) {
         case XenbusStateInitialising:
-			if (device->hotplug_status_connected)
-				err = xenbus_switch_state(device, XenbusStateInitWait);
+            if (device->hotplug_status_connected)
+                err = xenbus_switch_state(device, XenbusStateInitWait);
             break;
         case XenbusStateInitialised:
     	case XenbusStateConnected:

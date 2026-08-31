@@ -50,6 +50,7 @@
 #define TD_VBD_SECONDARY_STANDBY    2
 
 struct td_nbdserver;
+struct td_vbd_queue;
 
 struct td_vbd_rrd {
 
@@ -91,8 +92,9 @@ struct td_vbd_handle {
 
 	/**
 	 * VBD state (TD_VBD_XXX, excluding SECONDARY and request-related)
+	 * Atomic: read lock-free from IO threads, written from control path.
 	 */
-	td_flag_t                   state;
+	td_atomic_flag_t            state;
 
 	/**
 	 * List of images: the leaf is at the head, the tree root is at the tail.
@@ -118,24 +120,32 @@ struct td_vbd_handle {
 
 	int                         nbd_mirror_failed;
 
-	struct list_head            new_requests;
-	struct list_head            pending_requests;
-	struct list_head            failed_requests;
-	struct list_head            completed_requests;
+	struct td_vbd_queue {
+		struct list_head    new_requests;
+		struct list_head    pending_requests;
+		struct list_head    failed_requests;
+		struct list_head    completed_requests;
+		struct timeval      ts;
+		_Atomic uint64_t    secs_pending;
+		td_sector_count_t   secs;
+		pthread_mutex_t     mutex;
+		bool                watchdog_warned;
+		int		    efd;
+		event_id_t          event;
+		struct td_vbd_handle* vbd;
+
+		/* Per-queue counters (lock-free, single-writer per queue) */
+		uint64_t            received;
+		uint64_t            returned;
+		uint64_t            kicked;
+		uint64_t            retries;
+		uint64_t            errors;
+	} queues[BLKIF_MAX_QUEUES];
 	pthread_mutex_t             mutex;
 
 	struct list_head            next;
 
 	uint16_t                    req_timeout; /* in seconds */
-	struct timeval              ts;
-
-	uint64_t                    received;
-	uint64_t                    returned;
-	uint64_t                    kicked;
-	uint64_t                    secs_pending;
-	uint64_t                    retries;
-	uint64_t                    errors;
-	td_sector_count_t           secs;
 
 	struct td_nbdserver        *nbdserver;
 	struct td_nbdserver        *nbdserver_new;
@@ -153,11 +163,7 @@ struct td_vbd_handle {
 
 	struct td_vbd_encryption   encryption;
 
-	bool                       watchdog_warned;
-
 	td_flag_t                  driver_flags;
-	int                        efd;
-	event_id_t                 event;
 };
 
 #define tapdisk_vbd_for_each_request(vreq, tmp, list)	                \
@@ -202,28 +208,29 @@ void tapdisk_vbd_close_vdi(td_vbd_t *);
 int tapdisk_vbd_attach(td_vbd_t *, const char *, int);
 void tapdisk_vbd_detach(td_vbd_t *);
 
-int tapdisk_vbd_queue_request(td_vbd_t *, td_vbd_request_t *);
+int tapdisk_vbd_queue_request(td_vbd_t *, td_vbd_request_t *, td_queue_id_t, bool);
 void tapdisk_vbd_forward_request(td_request_t);
 
 int tapdisk_vbd_get_disk_info(td_vbd_t *, td_disk_info_t *);
-int tapdisk_vbd_retry_needed(td_vbd_t *);
-int tapdisk_vbd_quiesce_queue(td_vbd_t *);
+bool tapdisk_vbd_retry_needed(td_vbd_queue_t *);
+bool tapdisk_vbd_pending_queues(td_vbd_t *vbd);
+bool tapdisk_vbd_failed_queues(td_vbd_t *vbd);
 int tapdisk_vbd_start_queue(td_vbd_t *);
-int tapdisk_vbd_issue_requests(td_vbd_t *);
+int tapdisk_vbd_issue_requests(td_vbd_queue_t *);
 int tapdisk_vbd_kill_queue(td_vbd_t *);
 int tapdisk_vbd_pause(td_vbd_t *);
 void tapdisk_vbd_squash_pause_logging(bool squash);
 int tapdisk_vbd_resume(td_vbd_t *, const char *, td_err *);
-void tapdisk_vbd_kick(td_vbd_t *, bool);
+void tapdisk_vbd_kick(td_vbd_queue_t *, bool);
+void tapdisk_vbd_process_queue(td_vbd_queue_t *);
 void tapdisk_vbd_check_state(td_vbd_t *);
 void tapdisk_vbd_free(td_vbd_t *);
 int tapdisk_vbd_commit(td_vbd_t *, const char *);
 int tapdisk_vbd_query_commit_job(td_vbd_t *, td_query_t *);
 int tapdisk_vbd_cancel_commit_job(td_vbd_t *, bool);
 
-void tapdisk_vbd_complete_td_request(td_request_t, int);
 int add_extent(tapdisk_extents_t *, td_request_t *);
-int tapdisk_vbd_issue_request(td_vbd_t *, td_vbd_request_t *);
+int tapdisk_vbd_issue_request(td_vbd_queue_t *, td_vbd_request_t *);
 
 /**
  * Checks whether there are new requests and if so it submits them, prodived
@@ -231,13 +238,13 @@ int tapdisk_vbd_issue_request(td_vbd_t *, td_vbd_request_t *);
  *
  * Returns 1 if new requests have been issued, otherwise it returns 0.
  */
-int tapdisk_vbd_recheck_state(td_vbd_t *);
+int tapdisk_vbd_recheck_state(td_vbd_queue_t *);
 
-void tapdisk_vbd_check_progress(td_vbd_t *);
+void tapdisk_vbd_check_progress(td_vbd_queue_t *);
 void tapdisk_vbd_debug(td_vbd_t *);
 int tapdisk_vbd_start_nbdservers(td_vbd_t *);
 void tapdisk_vbd_stats(td_vbd_t *, td_stats_t *);
-void tapdisk_vbd_complete_block_status_request(td_request_t, int);
+int tapdisk_vbd_complete_block_status_request(td_request_t, int);
 
 /**
  * Tells whether the VBD contains at least one dead ring.

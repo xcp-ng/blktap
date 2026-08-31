@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2020, Citrix Systems, Inc.
+ * Copyright (c) 2026, Vates SAS
  *
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
- * 
+ *
  *  1. Redistributions of source code must retain the above copyright
  *     notice, this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
- *  3. Neither the name of the copyright holder nor the names of its 
- *     contributors may be used to endorse or promote products derived from 
+ *  3. Neither the name of the copyright holder nor the names of its
+ *     contributors may be used to endorse or promote products derived from
  *     this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
@@ -28,44 +28,11 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdarg.h>
-#include <stddef.h>
-#include <setjmp.h>
-#include <cmocka.h>
+#ifndef _TAPDISK_COMMON_H_
+#define _TAPDISK_COMMON_H_
 
-#include <cmocka-compat.h>
+#define BLKIF_MAX_QUEUES           4
 
-#include "tapdisk.h"
-#include "tapdisk-interface.h"
+#define TAPDISK_MAX_VBD_THREADS    BLKIF_MAX_QUEUES
 
-int
-__wrap_tapdisk_image_check_request(td_image_t *image, td_vbd_request_t *vreq)
-{
-	return (int)mock();
-}
-
-void
-__wrap_td_queue_block_status(td_image_t *image, td_request_t *treq)
-{
-	check_expected_ptr(treq);
-}
-
-int
-__wrap_send(int fd, void* buf, size_t size, int flags)
-{
-	check_expected_ptr(buf);
-	check_expected_int(fd);
-	check_expected_uint(size);
-	check_expected_int(flags);
-	return (int)mock();
-}
-
-event_id_t
-__wrap_tapdisk_server_register_event(char mode, int fd,
-                              struct timeval timeout, event_cb_t cb, void *data)
-{
-	check_expected_int(mode);
-	check_expected_ptr(cb);
-	return 0;
-}
-
+#endif

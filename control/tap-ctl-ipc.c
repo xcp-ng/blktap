@@ -35,7 +35,7 @@
 #include "compiler.h"
 #include "util.h"
 
-int tap_ctl_debug = 0;
+bool tap_ctl_debug = false;
 
 #define eintr_retry(res, op) \
 	do {		     \

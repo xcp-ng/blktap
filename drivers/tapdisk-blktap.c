@@ -225,42 +225,48 @@ tapdisk_blktap_put_response(td_blktap_t *tap,
 {
 	blktap_ring_rsp_t *rsp;
 	int op = 0;
-        unsigned long long interval;
-        struct timeval now;
+	unsigned long long interval;
+	struct timeval now;
 
-	pthread_mutex_lock(&tap->mutex);
 	BUG_ON(!tap->vma);
 
-	rsp = BLKTAP_GET_RESPONSE(tap, tap->rsp_prod_pvt);
-
-        gettimeofday(&now, NULL);
-        interval = timeval_to_us(&now) - timeval_to_us(&req->ts);
 	switch (req->vreq.op) {
 	case TD_OP_READ:
 		op = BLKTAP_OP_READ;
-                tap->blktap_stats.stats->read_reqs_completed++;
-                tap->blktap_stats.stats->read_total_ticks += interval;
 		break;
 	case TD_OP_WRITE:
 		op = BLKTAP_OP_WRITE;
-                tap->blktap_stats.stats->write_reqs_completed++;
-                tap->blktap_stats.stats->write_total_ticks += interval;
                 break;
 	default:
 		BUG();
 	}
 
-	if (error)
-		tap->blktap_stats.stats->io_errors++;
+	pthread_mutex_lock(&tap->mutex);
+	rsp = BLKTAP_GET_RESPONSE(tap, tap->rsp_prod_pvt);
 
 	rsp->id        = req->id;
 	rsp->operation = op;
 	rsp->status    = tapdisk_blktap_error_status(tap, error);
 
-	tapdisk_blktap_free_request_locked(tap, req);
-
 	__tapdisk_blktap_push_response_locked(tap, final);
 	pthread_mutex_unlock(&tap->mutex);
+
+	gettimeofday(&now, NULL);
+	interval = timeval_to_us(&now) - timeval_to_us(&req->ts);
+	switch (op) {
+	case BLKTAP_OP_READ:
+		tap->blktap_stats.stats->read_reqs_completed++;
+		tap->blktap_stats.stats->read_total_ticks += interval;
+		break;
+	case BLKTAP_OP_WRITE:
+		tap->blktap_stats.stats->write_reqs_completed++;
+		tap->blktap_stats.stats->write_total_ticks += interval;
+		break;
+	}
+
+	if (error)
+		tap->blktap_stats.stats->io_errors++;
+
 }
 
 static void
@@ -270,6 +276,8 @@ tapdisk_blktap_complete_request(td_blktap_t *tap,
 {
 	if (likely(tap->vma))
 		tapdisk_blktap_put_response(tap, req, error, final);
+
+	tapdisk_blktap_free_request_locked(tap, req);
 }
 
 static void
@@ -364,11 +372,7 @@ tapdisk_blktap_parse_request(td_blktap_t *tap,
 		goto fail;
 
 	req->id = msg->id;
-	snprintf(req->name, sizeof(req->name),
-		 "tap-%d.%d", tap->minor, req->id);
-
 	vreq->op    = op;
-	vreq->name  = req->name;
 	vreq->token = tap;
 	vreq->cb    = __tapdisk_blktap_request_cb;
 
@@ -408,7 +412,7 @@ tapdisk_blktap_get_requests(td_blktap_t *tap)
 			goto fail_ring;
 		}
 
-		err = tapdisk_vbd_queue_request(tap->vbd, &req->vreq);
+		err = tapdisk_vbd_queue_request(tap->vbd, &req->vreq, (td_queue_id_t)0, (rc+1 == rp));
 		if (err)
 			tapdisk_blktap_complete_request(tap, req, err, 1);
 	}
@@ -559,7 +563,7 @@ __tapdisk_blktap_close(td_blktap_t *tap)
 	 */
         int err;
 	if (tap->event_id >= 0) {
-		tapdisk_server_unregister_event(tap->event_id);
+		tapdisk_server_unregister_io_event(0, tap->event_id);
 		tap->event_id = -1;
 	}
 
@@ -624,7 +628,8 @@ tapdisk_blktap_open(const char *devname, td_vbd_t *vbd, td_blktap_t **_tap)
             goto fail;
 
 	tap->event_id =
-		tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
+		tapdisk_server_register_io_event(0,  /* Queue ID 0 */
+					      SCHEDULER_POLL_READ_FD,
 					      tap->fd, TV_ZERO,
 					      tapdisk_blktap_fd_event,
 					      tap);

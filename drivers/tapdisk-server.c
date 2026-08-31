@@ -43,6 +43,8 @@
 #include "tapdisk-log.h"
 #include "td-blkif.h"
 #include "timeout-math.h"
+#include "util.h"
+#include "td-tracepoints.h"
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -51,19 +53,28 @@
 #define DBG(_level, _f, _a...)       tlog_write(_level, _f, ##_a)
 #define ERR(_err, _f, _a...)         tlog_error(_err, _f, ##_a)
 
-#define TAPDISK_TIOCBS              (TAPDISK_DATA_REQUESTS + 50)
+#define TAPDISK_TIOCBS_PER_QUEUE    (MAX_REQUESTS * BLKIF_MAX_SEGMENTS_PER_REQUEST + 50)
 
 typedef struct tapdisk_server {
-	int                          run;
+	_Atomic int                  run;
 	struct list_head             vbds;
 	scheduler_t                  scheduler;
-	tqueue                       rw_queue;
-	tqueue                       ro_queue;
+	tqueue                       rw_queue[TAPDISK_MAX_VBD_THREADS];
+	tqueue                       ro_queue[TAPDISK_MAX_VBD_THREADS];
 	struct backend              *ro_backend;
 	struct backend              *rw_backend;
 	char                        *name;
 	char                        *ident;
 	int                          facility;
+
+	/* IO threads states */
+	struct {
+		pthread_t            tid;
+		char                 name[16];
+		event_id_t           eventid;
+		int                  eventfd;
+		scheduler_t          scheduler;
+	} io_threads[TAPDISK_MAX_VBD_THREADS];
 
 	/* Memory mode state */
 	struct {
@@ -94,12 +105,16 @@ typedef struct tapdisk_server {
 
 static tapdisk_server_t server;
 
+static __thread td_queue_id_t current_qid = 0;
+
 unsigned int PAGE_SIZE;
 unsigned int PAGE_MASK;
 unsigned int PAGE_SHIFT;
 
 #define tapdisk_server_for_each_vbd(vbd, tmp)			        \
 	list_for_each_entry_safe(vbd, tmp, &server.vbds, next)
+
+static void tapdisk_server_io_thread_release();
 
 td_image_t *
 tapdisk_server_get_shared_image(td_image_t *image)
@@ -161,7 +176,7 @@ tapdisk_server_prep_tiocb(struct tiocb *tiocb, int fd, int rw, char *buf, size_t
 void
 tapdisk_server_queue_tiocb(struct tiocb *tiocb)
 {
-	server.rw_backend->queue(server.rw_queue, tiocb);
+	server.rw_backend->queue(server.rw_queue[current_qid], tiocb);
 }
 
 void
@@ -174,7 +189,7 @@ tapdisk_server_prep_tiocb_ro(struct tiocb *tiocb, int fd, int rw, char *buf, siz
 void
 tapdisk_server_queue_tiocb_ro(struct tiocb *tiocb)
 {
-	server.ro_backend->queue(server.ro_queue, tiocb);
+	server.ro_backend->queue(server.ro_queue[current_qid], tiocb);
 }
 
 void
@@ -182,10 +197,12 @@ tapdisk_server_debug(void)
 {
 	td_vbd_t *vbd, *tmp;
 
-	if (likely(server.rw_queue))
-		server.rw_backend->debug(server.rw_queue);
-	if (likely(server.ro_queue))
-		server.ro_backend->debug(server.ro_queue);
+	for (int qid = 0; qid < TAPDISK_MAX_VBD_THREADS; qid++) {
+		if (likely(server.rw_queue[qid]))
+			server.rw_backend->debug(server.rw_queue[qid]);
+		if (likely(server.ro_queue[qid]))
+			server.ro_backend->debug(server.ro_queue[qid]);
+	}
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
 		tapdisk_vbd_debug(vbd);
@@ -198,7 +215,7 @@ void
 tapdisk_server_check_state(void)
 {
 	if (list_empty(&server.vbds))
-		server.run = 0;
+		atomic_store(&server.run, 0);
 }
 
 event_id_t
@@ -222,31 +239,96 @@ tapdisk_server_mask_event(event_id_t event, int masked)
 }
 
 void
-tapdisk_server_set_max_timeout(int seconds)
+tapdisk_server_set_max_timeout(struct timeval tv)
 {
-	scheduler_set_max_timeout(&server.scheduler, TV_SECS(seconds));
+	scheduler_set_max_timeout(&server.scheduler, tv);
 }
 
-static void
-tapdisk_server_assert_locks(void)
+static
+void tapdisk_server_io_thread_wake(td_queue_id_t qid)
 {
+	uint64_t token = 1;
+	int n;
 
+	// XXX: thread_wake might called by IO backend before IO threads are fully
+	//      initialized
+	if (server.io_threads[qid].eventfd == -1)
+		return;
+
+	n = write(server.io_threads[qid].eventfd, &token, sizeof(token));
+	ASSERT(n == 8);
 }
 
+void tapdisk_server_io_thread_handler(event_id_t id, char mode __attribute__((unused)), void *private)
+{
+	td_queue_id_t qid = (td_queue_id_t)(long)private;
+	uint64_t cnt;
+	int n;
+
+	n = read(server.io_threads[qid].eventfd, &cnt, sizeof(cnt));
+	ASSERT(n == 8);
+}
+
+void
+tapdisk_server_io_scheduler_wake(td_queue_id_t qid)
+{
+	tapdisk_server_io_thread_wake(qid);
+}
+
+event_id_t
+tapdisk_server_register_io_event(td_queue_id_t qid, char mode, int fd,
+				 struct timeval timeout, event_cb_t cb, void *data)
+{
+	event_id_t eid;
+
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	eid =  scheduler_register_event(&server.io_threads[qid].scheduler,
+					mode, fd, timeout, cb, data);
+
+	/* Wake thread to use the newly registered event */
+	tapdisk_server_io_thread_wake(qid);
+
+	return eid;
+}
+
+void
+tapdisk_server_unregister_io_event(td_queue_id_t qid, event_id_t event)
+{
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	return scheduler_unregister_event(&server.io_threads[qid].scheduler, event);
+}
+
+void
+tapdisk_server_mask_io_event(td_queue_id_t qid, event_id_t event, int masked)
+{
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	return scheduler_mask_event(&server.io_threads[qid].scheduler, event, masked);
+}
+
+void
+tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int seconds)
+{
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	scheduler_set_max_timeout(&server.io_threads[qid].scheduler, TV_SECS(seconds));
+}
+
+
 static void
-tapdisk_server_set_retry_timeout(void)
+tapdisk_server_set_retry_timeout(td_queue_id_t qid)
 {
 	td_vbd_t *vbd, *tmp;
 
-	tapdisk_server_for_each_vbd(vbd, tmp)
-		if (tapdisk_vbd_retry_needed(vbd)) {
-			tapdisk_server_set_max_timeout(TD_VBD_RETRY_INTERVAL);
+	/* FIXME: VBD list not locked */
+	tapdisk_server_for_each_vbd(vbd, tmp) {
+		if (tapdisk_vbd_retry_needed(&vbd->queues[qid])) {
+			tapdisk_server_set_io_max_timeout(qid, TD_VBD_RETRY_INTERVAL);
 			return;
 		}
+	}
 }
 
 static void
-tapdisk_server_check_progress(void)
+tapdisk_server_check_progress(td_queue_id_t qid)
 {
 	struct timeval now;
 	td_vbd_t *vbd, *tmp;
@@ -254,32 +336,37 @@ tapdisk_server_check_progress(void)
 	gettimeofday(&now, NULL);
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_check_progress(vbd);
+		tapdisk_vbd_check_progress(&vbd->queues[qid]);
 }
 
 static void
-tapdisk_server_submit_tiocbs(void)
+tapdisk_server_submit_tiocbs(td_queue_id_t qid)
 {
-	server.rw_backend->submit_all(server.rw_queue);
-	server.ro_backend->submit_all(server.ro_queue);
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_BEGIN, 0);
+	server.rw_backend->submit_all(server.rw_queue[qid]);
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_END, 0);
+
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_BEGIN, 1);
+	server.ro_backend->submit_all(server.ro_queue[qid]);
+	tracepoint(tapdisk, aio_submit, qid, TP_PHASE_END, 1);
 }
 
 static void
-tapdisk_server_kick_responses(void)
-{
-	td_vbd_t *vbd, *tmp;
-
-	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_kick(vbd, false);
-}
-
-static void
-tapdisk_server_check_vbds(void)
+tapdisk_server_kick_responses(td_queue_id_t qid)
 {
 	td_vbd_t *vbd, *tmp;
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_check_state(vbd);
+		tapdisk_vbd_kick(&vbd->queues[qid], false);
+}
+
+static void
+tapdisk_server_check_vbds(td_queue_id_t qid)
+{
+	td_vbd_t *vbd, *tmp;
+
+	tapdisk_server_for_each_vbd(vbd, tmp)
+		tapdisk_vbd_process_queue(&vbd->queues[qid]);
 }
 
 /**
@@ -287,44 +374,50 @@ tapdisk_server_check_vbds(void)
  * which have been issued.
  */
 static int
-tapdisk_server_recheck_vbds(void)
+tapdisk_server_recheck_vbds(td_queue_id_t qid)
 {
 	td_vbd_t *vbd, *tmp;
 	int rv = 0;
 
-	tapdisk_server_for_each_vbd(vbd, tmp)
-		rv += tapdisk_vbd_recheck_state(vbd);
+	// TODO: change that, ok for one VBD, but maybe we should have
+	//       1:1 thread per queue (for the moment we are sharing a
+	//       thread between multiple VBD)
+	tapdisk_server_for_each_vbd(vbd, tmp) {
+		rv += tapdisk_vbd_recheck_state(&vbd->queues[qid]);
+	}
 
 	return rv;
-}
-
-static void
-tapdisk_server_stop_vbds(void)
-{
-	td_vbd_t *vbd, *tmp;
-
-	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_kill_queue(vbd);
 }
 
 static int
 tapdisk_server_init_aio(void)
 {
 	int err;
-       	err = server.ro_backend->init(&server.ro_queue, TAPDISK_TIOCBS,
-				  TIO_DRV_LIO, NULL);
-	if(err)
-		return err;
-	
-	return server.rw_backend->init(&server.rw_queue, TAPDISK_TIOCBS,
-				  TIO_DRV_LIO, NULL);
+
+	for (int qid = 0; qid < TAPDISK_MAX_VBD_THREADS; qid++) {
+		err = server.ro_backend->init(&server.ro_queue[qid],
+				  TAPDISK_TIOCBS_PER_QUEUE,
+				  TIO_DRV_LIO, NULL, qid);
+		if (err)
+			return err;
+
+		err = server.rw_backend->init(&server.rw_queue[qid],
+				  TAPDISK_TIOCBS_PER_QUEUE,
+				  TIO_DRV_LIO, NULL, qid);
+		if (err)
+			return err;
+	}
+
+	return 0;
 }
 
 static void
 tapdisk_server_close_aio(void)
 {
-	server.rw_backend->free_queue(&server.rw_queue);
-	server.ro_backend->free_queue(&server.ro_queue);
+	for (int qid = 0; qid < TAPDISK_MAX_VBD_THREADS; qid++) {
+		server.rw_backend->free_queue(&server.rw_queue[qid]);
+		server.ro_backend->free_queue(&server.ro_queue[qid]);
+	}
 }
 
 int
@@ -374,6 +467,8 @@ tapdisk_server_close_tlog(void)
 static void
 tapdisk_server_close(void)
 {
+	tapdisk_server_io_thread_release();
+
 	if (likely(server.tlog_reopen_evid >= 0))
 		tapdisk_server_unregister_event(server.tlog_reopen_evid);
 
@@ -388,32 +483,61 @@ tapdisk_server_close(void)
 }
 
 void
-tapdisk_server_iterate(void)
+tapdisk_io_iterate(td_queue_id_t qid)
 {
 	int ret;
 
-	tapdisk_server_assert_locks();
-	tapdisk_server_set_retry_timeout();
-	tapdisk_server_check_progress();
+	current_qid = qid;
+
+	tapdisk_server_set_retry_timeout(qid);
+	tapdisk_server_check_progress(qid);
+
+	ret = scheduler_wait_for_events(&server.io_threads[qid].scheduler);
+	if (ret < 0)
+		DBG(TLOG_WARN, "server wait returned %s\n", strerror(-ret));
+
+	tapdisk_server_check_vbds(qid);
+	do {
+		tapdisk_server_submit_tiocbs(qid);
+		tapdisk_server_kick_responses(qid);
+
+		ret = tapdisk_server_recheck_vbds(qid);
+	} while (ret); /* repeat until there are no new requests to issue */
+}
+
+static void*
+__tapdisk_io_thread_run(void* arg)
+{
+	td_queue_id_t  qid = (unsigned long)arg;
+
+	while (atomic_load(&server.run))
+		tapdisk_io_iterate(qid);
+
+	return NULL;
+}
+
+void
+tapdisk_server_iterate(void)
+{
+	td_vbd_t *vbd, *tmp;
+	int ret;
 
 	ret = scheduler_wait_for_events(&server.scheduler);
 	if (ret < 0)
 		DBG(TLOG_WARN, "server wait returned %s\n", strerror(-ret));
 
-	tapdisk_server_check_vbds();
-	do {
-		tapdisk_server_submit_tiocbs();
-		tapdisk_server_kick_responses();
-
-		ret = tapdisk_server_recheck_vbds();
-	} while (ret); /* repeat until there are no new requests to issue */
+	tapdisk_server_for_each_vbd(vbd, tmp)
+		tapdisk_vbd_check_state(vbd);
 }
 
 static void
 __tapdisk_server_run(void)
 {
-	while (server.run)
+	while (atomic_load(&server.run)) {
 		tapdisk_server_iterate();
+	}
+
+	/* IO threads are woken up and joined by tapdisk_server_close(). */
 }
 
 static void
@@ -426,45 +550,52 @@ tapdisk_server_signal_handler(event_id_t id, char mode __attribute__((unused)), 
 	struct td_xenblkif *blkif;
 	static int xfsz_error_sent = 0;
 
-	size = read(server.sigfd, &fdsi, sizeof(fdsi));
-	if (size != sizeof(fdsi)) {
-		ERR(EFBIG, "failed to read signals");
-		return;
-	}
+	while ((size = read(server.sigfd, &fdsi, sizeof(fdsi))) > 0) {
+		if (size != sizeof(fdsi)) {
+			ERR(EFBIG, "failed to read signals");
+			continue;
+		}
 
-	signal = fdsi.ssi_signo;
+		signal = fdsi.ssi_signo;
 
-	switch (signal) {
-	case SIGBUS:
-		tapdisk_server_for_each_vbd(vbd, tmp)
-			tapdisk_vbd_close(vbd);
-		break;
-
-	case SIGXFSZ:
-		ERR(EFBIG, "received SIGXFSZ");
-		tapdisk_server_stop_vbds();
-		if (xfsz_error_sent)
+		switch (signal) {
+		case SIGBUS:
+			tapdisk_server_for_each_vbd(vbd, tmp)
+				tapdisk_vbd_close(vbd);
 			break;
 
-		xfsz_error_sent = 1;
-		break;
+		case SIGXFSZ:
+			ERR(EFBIG, "received SIGXFSZ");
 
-	case SIGUSR1:
-		DBG(TLOG_INFO, "debugging on signal %d\n", signal);
-		tapdisk_server_debug();
-		break;
+			tapdisk_server_for_each_vbd(vbd, tmp)
+				tapdisk_vbd_kill_queue(vbd);
 
-	case SIGUSR2:
-		DBG(TLOG_INFO, "triggering polling on signal %d\n", signal);
-		tapdisk_server_for_each_vbd(vbd, tmp)
-			list_for_each_entry(blkif, &vbd->rings, entry)
-				tapdisk_start_polling(blkif);
-		break;
+			if (xfsz_error_sent)
+				break;
 
-	case SIGHUP:
-		tapdisk_server_event_set_timeout(server.tlog_reopen_evid, TV_ZERO);
-		break;
+			xfsz_error_sent = 1;
+			break;
+
+		case SIGUSR1:
+			DBG(TLOG_INFO, "debugging on signal %d\n", signal);
+			tapdisk_server_debug();
+			break;
+
+		case SIGUSR2:
+			DBG(TLOG_INFO, "triggering polling on signal %d\n", signal);
+			tapdisk_server_for_each_vbd(vbd, tmp)
+				list_for_each_entry(blkif, &vbd->rings, entry)
+					tapdisk_start_polling_all_queues(blkif);
+			break;
+
+		case SIGHUP:
+			tapdisk_server_event_set_timeout(server.tlog_reopen_evid, TV_ZERO);
+			break;
+		}
 	}
+
+	if (size < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+		ERR(errno, "failed to read signals: %s", strerror(errno));
 }
 
 
@@ -565,7 +696,6 @@ static void lowmem_timeout(event_id_t id, char mode, void *data)
 		ERR(-ret, "Failed to re-init low memory handler: %s\n",
 		    strerror(-ret));
 		lowmem_cleanup();
-		return;
 	}
 }
 
@@ -765,7 +895,16 @@ tapdisk_server_init(void)
 	memset(&server, 0, sizeof(server));
 	INIT_LIST_HEAD(&server.vbds);
 
+	server.tlog_reopen_evid = -1;
+	server.signal_handler_evid = -1;
+
 	scheduler_initialize(&server.scheduler);
+
+	for (int qid = 0; qid < ARRAY_SIZE(server.io_threads); qid++) {
+		server.io_threads[qid].tid = 0;   /* XXX: not portable; but practical... */
+		server.io_threads[qid].eventfd = -1;
+		scheduler_initialize(&server.io_threads[qid].scheduler);
+	}
 
 	if ((ret = tapdisk_server_initialize_lowmem_mode()) < 0) {
 		EPRINTF("Failed to initialize low memory handler: %s\n",
@@ -775,25 +914,109 @@ tapdisk_server_init(void)
 	}
 
 	if ((ret = tapdisk_server_initialize_cpumond_client()) < 0) {
-		EPRINTF("Failed to connect to cpumond: %s\n",
+		EPRINTF("Failed to connect to cpumond: %s (continuing without it)\n",
 			strerror(-ret));
 		cpumond_cleanup();
-		goto out;
+		ret = 0;  /* non-fatal: runnning without cpumond is ok */
 	}
 
 out:
-	server.tlog_reopen_evid = -1;
-	server.signal_handler_evid = -1;
+	return ret;
+}
+
+static void
+tapdisk_server_io_thread_release(void)
+{
+	/*
+	 * Stop and reap the IO threads. run must be cleared first so the
+	 * woken threads exit their loop. tid == 0 means never started or
+	 * already joined. Never pthread_cancel here: a joined pthread_t is
+	 * invalid, and cancelling a live thread could kill it while it
+	 * holds a queue mutex.
+	 */
+	atomic_store(&server.run, 0);
+
+	for (int qid = 0; qid < ARRAY_SIZE(server.io_threads); qid++) {
+		if (server.io_threads[qid].tid) {
+			tapdisk_server_io_scheduler_wake(qid);
+			pthread_join(server.io_threads[qid].tid, NULL);
+			server.io_threads[qid].tid = 0;
+		}
+
+		if (server.io_threads[qid].eventfd != -1) {
+			close(server.io_threads[qid].eventfd);
+			server.io_threads[qid].eventfd = -1;
+		}
+
+		tapdisk_server_unregister_io_event(qid, server.io_threads[qid].eventid);
+	}
+}
+
+static int
+tapdisk_server_io_thread_init(void)
+{
+	int err;
+
+	for (int qid = 0; qid < ARRAY_SIZE(server.io_threads); qid++) {
+		pthread_t tid;
+		int fd;
+
+		/* Wake IO thread mecanism */
+		fd = eventfd(0, 0);
+		if (fd < 0) {
+			EPRINTF("Failed to create eventfd: %s\n", strerror(errno));
+			goto fail;
+		}
+		server.io_threads[qid].eventfd = fd;
+
+		server.io_threads[qid].eventid =
+			tapdisk_server_register_io_event(qid,
+							 SCHEDULER_POLL_READ_FD,
+							 server.io_threads[qid].eventfd,
+							 TV_INF,
+							 tapdisk_server_io_thread_handler,
+							 (void*)(long)qid);
+
+		/* Create thread */
+		err = pthread_create(&tid , NULL, __tapdisk_io_thread_run, (void*)(unsigned long)qid);
+		if (err) {
+			EPRINTF("Failed to create IO thread #%d\n", qid);
+			goto fail;
+		}
+		server.io_threads[qid].tid = tid;
+
+		snprintf(server.io_threads[qid].name,
+			 sizeof(server.io_threads[qid].name), "td-queue-%d", qid);
+		pthread_setname_np(tid, server.io_threads[qid].name);
+	}
 
 	return 0;
+
+fail:
+	tapdisk_server_io_thread_release();
+
+	return 1;
 }
+
 
 int
 tapdisk_server_complete(void)
 {
 	int err;
+	sigset_t set;
+
+	sigemptyset(&set);
+	sigaddset(&set, SIGBUS);
+	sigaddset(&set, SIGXFSZ);
+	sigaddset(&set, SIGUSR1);
+	sigaddset(&set, SIGUSR2);
+	sigaddset(&set, SIGHUP);
+	pthread_sigmask(SIG_BLOCK, &set, NULL);
+
 	server.rw_backend = get_libaio_backend();
 	server.ro_backend = get_libaio_backend();
+
+	atomic_store(&server.run, 1);
 
 	err = tapdisk_server_init_aio();
 	if (err)
@@ -803,7 +1026,9 @@ tapdisk_server_complete(void)
 	if (err)
 		goto fail;
 
-	server.run = 1;
+	err = tapdisk_server_io_thread_init();
+	if (err)
+		goto fail;
 
 	return 0;
 
@@ -818,7 +1043,10 @@ tapdisk_server_initialize(const char *read, const char *write)
 {
 	int err;
 
-	tapdisk_server_init();
+
+	err = tapdisk_server_init();
+	if (err)
+		goto fail;
 
 	err = tapdisk_server_complete();
 	if (err)
@@ -847,18 +1075,18 @@ tapdisk_server_run()
 	sigaddset(&set, SIGUSR2);
 	sigaddset(&set, SIGHUP);
 	sigaddset(&set, SIGXFSZ);
-	server.sigfd = signalfd(-1, &set, 0);
+	server.sigfd = signalfd(-1, &set, SFD_NONBLOCK);
 	if (server.sigfd == -1) {
 		err = errno;
 		EPRINTF("failed to create a new signalfd: %s\n",
-			strerror(-err));
+			strerror(err));
 		goto out;
 	}
 
 	if (sigprocmask(SIG_BLOCK, &set, NULL) == -1) {
 		err = errno;
 		EPRINTF("failed to block signals we'd like to handle with signalfd: %s\n",
-			strerror(-err));
+			strerror(err));
 		goto out;
 	}
 
@@ -896,3 +1124,9 @@ tapdisk_server_event_set_timeout(event_id_t event_id, struct timeval timeo) {
 	return scheduler_event_set_timeout(&server.scheduler, event_id, timeo);
 }
 
+int
+tapdisk_server_io_event_set_timeout(td_queue_id_t qid, event_id_t event_id, struct timeval timeo) {
+	ASSERT(qid < ARRAY_SIZE(server.io_threads));
+	return scheduler_event_set_timeout(&server.io_threads[qid].scheduler,
+					   event_id, timeo);
+}

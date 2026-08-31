@@ -52,6 +52,7 @@
 
 #include "list.h"
 #include "compiler.h"
+#include "tapdisk-common.h"
 #include "tapdisk-log.h"
 #include "tapdisk-utils.h"
 #include "tapdisk-stats.h"
@@ -70,7 +71,7 @@ extern unsigned int PAGE_SHIFT;
 #define SECTOR_SHIFT                 9
 #define DEFAULT_SECTOR_SIZE          512
 
-#define TAPDISK_DATA_REQUESTS       (MAX_REQUESTS * BLKIF_MAX_SEGMENTS_PER_REQUEST)
+#define TAPDISK_DATA_REQUESTS       (MAX_REQUESTS * BLKIF_MAX_SEGMENTS_PER_REQUEST * BLKIF_MAX_QUEUES)
 
 //#define BLK_NOT_ALLOCATED            (-99)
 #define TD_NO_PARENT                 1
@@ -103,10 +104,19 @@ enum TD_OPS{
 #define TD_CREATE_MULTITYPE          0x00002
 
 #define TD_DRIVER_THREADED           0x00001
+#define TD_DRIVER_MULTIQUEUE         0x00002
 
 #define td_flag_set(word, flag)      ((word) |= (flag))
 #define td_flag_clear(word, flag)    ((word) &= ~(flag))
 #define td_flag_test(word, flag)     ((word) & (flag))
+
+#include <stdatomic.h>
+
+typedef _Atomic uint32_t             td_atomic_flag_t;
+
+#define td_atomic_flag_set(word, flag)   atomic_fetch_or(&(word), (flag))
+#define td_atomic_flag_clear(word, flag) atomic_fetch_and(&(word), ~(flag))
+#define td_atomic_flag_test(word, flag)  (atomic_load(&(word)) & (flag))
 
 #define TD_BLOCK_STATE_NONE  0
 #define TD_BLOCK_STATE_HOLE  (1 <<0)
@@ -114,6 +124,7 @@ enum TD_OPS{
 
 typedef uint16_t                     td_uuid_t;
 typedef uint32_t                     td_flag_t;
+typedef uint32_t                     td_queue_id_t;
 typedef uint64_t                     td_sector_t;
 typedef struct td_disk_id            td_disk_id_t;
 typedef struct td_disk_info          td_disk_info_t;
@@ -123,12 +134,13 @@ typedef struct td_image_handle       td_image_t;
 typedef struct td_sector_count       td_sector_count_t;
 typedef struct td_vbd_request        td_vbd_request_t;
 typedef struct td_vbd_handle         td_vbd_t;
+typedef struct td_vbd_queue          td_vbd_queue_t;
 typedef struct td_query              td_query_t;
 
 /* 
  * Prototype of the callback to activate as requests complete.
  */
-typedef void (*td_callback_t)(td_request_t, int);
+typedef int (*td_callback_t)(td_request_t, int);
 typedef void (*td_vreq_callback_t)(td_vbd_request_t*, int, void*, int);
 
 struct td_disk_id {
@@ -141,6 +153,8 @@ struct td_disk_info {
 	td_sector_t                  size;
 	long                         sector_size;
 	uint32_t                     info;
+	bool                         discard;
+	long                         discard_granularity;
 };
 
 struct td_iovec {
@@ -151,26 +165,30 @@ struct td_iovec {
 struct td_vbd_request {
 	int                         op;
 	td_sector_t                 sec;
+
+#ifdef HAVE_LTTNG
+	uint64_t                    req_id;
+#endif
+
 	struct td_iovec            *iov;
 	int                         iovcnt;
 
 	td_vreq_callback_t          cb;
 	void                       *token;
 	void			   *data;
-	const char                 *name;
 
 	int                         error;
 	int                         prev_error;
 
-	int                         submitting;
-	int                         secs_pending;
+	_Atomic int                 submitting;
+	_Atomic int                 secs_pending;
 	int                         num_retries;
 	struct timeval		    ts;
 	struct timeval              last_try;
 	/* When "reading-through" the local cache, don't write back to the source */
 	bool                        skip_mirror;
 
-	td_vbd_t                   *vbd;
+	td_vbd_queue_t             *vqueue;
 	struct list_head            next;
 	struct list_head           *list_head;
 };
@@ -221,6 +239,7 @@ struct tap_disk {
 	void (*td_queue_block_status)(td_driver_t *, td_request_t);
 	void (*td_queue_write)       (td_driver_t *, td_request_t);
 	void (*td_debug)             (td_driver_t *);
+	int  (*td_pending)           (td_driver_t *);
 	void (*td_stats)             (td_driver_t *, td_stats_t *);
 	int (*td_commit)             (td_driver_t *, const char *);
 	int (*td_query_commit_job)   (td_driver_t *, td_query_t *);

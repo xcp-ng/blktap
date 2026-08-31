@@ -219,19 +219,19 @@ tapback_write_pid(const char *pidfile)
  */
 static inline backend_t *
 tapback_backend_create(const char *name, const char *pidfile,
-        const domid_t domid, const bool barrier)
+                       const domid_t domid, const bool barrier, const bool multiqueue)
 {
     int err;
     int len;
-	backend_t *backend = NULL;
+    backend_t *backend = NULL;
 
     ASSERT(name);
 
-	backend = calloc(1, sizeof(*backend));
-	if (!backend) {
-		err = errno;
-		goto out;
-	}
+    backend = calloc(1, sizeof(*backend));
+    if (!backend) {
+        err = errno;
+        goto out;
+    }
 
     if (pidfile) {
         backend->pidfile = strdup(pidfile);
@@ -254,7 +254,8 @@ tapback_backend_create(const char *name, const char *pidfile,
         goto out;
     }
 
-	backend->barrier = barrier;
+    backend->barrier = barrier;
+    backend->multiqueue = multiqueue;
 
     backend->path = NULL;
 
@@ -498,6 +499,7 @@ usage(FILE * const stream, const char * const prog)
 
     fprintf(stream,
             "usage: %s\n"
+            "\t[-x|--domid]\n"
             "\t[-d|--debug]\n"
             "\t[-h|--help]\n"
             "\t[-v|--verbose]\n"
@@ -574,9 +576,10 @@ int main(int argc, char **argv)
     char *opt_name = "vbd3", *opt_pidfile = NULL, *end = NULL;
     bool opt_debug = false, opt_verbose = false;
     int err = 0;
-	backend_t *backend = NULL;
+    backend_t *backend = NULL;
     domid_t opt_domid = 0;
-	bool opt_barrier = true;
+    bool opt_barrier = true;
+    bool opt_queues = true;
 
 	if (access("/dev/xen/gntdev", F_OK ) == -1) {
 		WARN(NULL, "grant device does not exist\n");
@@ -604,10 +607,11 @@ int main(int argc, char **argv)
             {"pidfile", 0, NULL, 'p'},
             {"domain", 0, NULL, 'x'},
             {"nobarrier", 0, NULL, 'b'},
+            {"noqueues", 0, NULL, 'q'},
         };
         int c;
 
-        c = getopt_long(argc, argv, "hdvn:p:x:b", longopts, NULL);
+        c = getopt_long(argc, argv, "hdvn:p:x:bq", longopts, NULL);
         if (c < 0)
             break;
 
@@ -644,9 +648,12 @@ int main(int argc, char **argv)
             }
             INFO(NULL, "only serving domain %d\n", opt_domid);
             break;
-		case 'b':
-			opt_barrier = false;
-			break;
+        case 'b':
+            opt_barrier = false;
+            break;
+        case 'q':
+            opt_queues = false;
+            break;
         case '?':
             goto usage;
         }
@@ -680,10 +687,10 @@ int main(int argc, char **argv)
         goto fail;
     }
 
-	backend = tapback_backend_create(opt_name, opt_pidfile, opt_domid,
-			opt_barrier);
-	if (!backend) {
-		err = errno;
+    backend = tapback_backend_create(opt_name, opt_pidfile, opt_domid,
+                                     opt_barrier, opt_queues);
+    if (!backend) {
+        err = errno;
         WARN(NULL, "error creating back-end: %s\n", strerror(err));
         goto fail;
     }

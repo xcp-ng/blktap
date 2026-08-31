@@ -202,7 +202,7 @@ tapback_backend_create_device(backend_t *backend,
     vbd_t *device = NULL;
     int err = 0;
 
-	ASSERT(backend);
+    ASSERT(backend);
     ASSERT(name);
 
     DBG(NULL, "%s creating device\n", name);
@@ -213,7 +213,7 @@ tapback_backend_create_device(backend_t *backend,
         goto out;
     }
 
-	device->backend = backend;
+    device->backend = backend;
     list_add_tail(&device->backend_entry,
             &device->backend->slave.slave.devices);
 
@@ -326,8 +326,10 @@ physical_device_path_changed(vbd_t *device) {
 	 * get the VBD parameters from the tapdisk
 	 */
 	if ((err = tap_ctl_info(device->tap->pid, &device->sectors,
-					&device->sector_size, &device->info,
-					device->minor))) {
+				&device->sector_size, &device->info,
+				&device->max_queues,
+				&device->discard, &device->discard_granularity,
+				device->minor))) {
 		WARN(device, "error retrieving disk characteristics: %s\n",
 		     strerror(-err));
 		goto out;
@@ -365,6 +367,8 @@ out:
 		free(device->tap);
 		device->tap = NULL;
 		device->sector_size = device->sectors = device->info = 0;
+		device->discard = false;
+		device->discard_granularity = 0;
 	}
 	free(s);
 done:
@@ -474,7 +478,7 @@ physical_device_changed(vbd_t *device) {
 
     err = find_tapdisk(device->minor, device->tap);
     if (err) {
-        WARN(device, "error looking for tapdisk: %s\n", strerror(-err));
+        WARN(device, "error looking for tapdisk minor=%d: %s\n", device->minor, strerror(-err));
         goto out;
     }
 
@@ -485,10 +489,21 @@ physical_device_changed(vbd_t *device) {
      */
     if ((err = tap_ctl_info(device->tap->pid, &device->sectors,
                     &device->sector_size, &info,
+                    &device->max_queues,
+                    &device->discard, &device->discard_granularity,
                     device->minor))) {
         WARN(device, "error retrieving disk characteristics: %s\n",
                 strerror(-err));
         goto out;
+    }
+
+    /* Enable multi-queue */
+    if (device->backend->multiqueue &&	device->max_queues > 1) {
+	if ((err = tapback_device_printf(device, XBT_NULL, "multi-queue-max-queues", true, "%d",
+					 device->max_queues))) {
+	    WARN(device, "failed to write multi-queue-max-queues: %s\n", strerror(-err));
+	    goto out;
+	}
     }
 
 	err = tapback_device_printf(device, XBT_NULL, "kthread-pid", false, "%d",
@@ -522,6 +537,8 @@ out:
         free(device->tap);
         device->tap = NULL;
         device->sector_size = device->sectors = device->info = 0;
+        device->discard = false;
+        device->discard_granularity = 0;
     }
     free(s);
     return err;
@@ -806,7 +823,7 @@ tapback_backend_probe_device(backend_t *backend,
     vbd_t *device = NULL;
     char * s = NULL;
 
-	ASSERT(backend);
+    ASSERT(backend);
     ASSERT(devname);
 
     ASSERT(!tapback_is_master(backend));
@@ -1200,8 +1217,8 @@ tapback_backend_handle_backend_watch(backend_t *backend,
                 }
                 if (log_level == LOG_DEBUG)
                     args[i++] = "-v";
-				if (!backend->barrier)
-					args[i++] = "-b";
+		if (!backend->barrier)
+		    args[i++] = "-b";
                 args[i] = NULL;
                 /*
                  * TODO we're hard-coding the name of the binary, better let

@@ -58,12 +58,6 @@ struct td_xenblkif_req {
      */
     void *vma;
 
-    /*
-     * TODO Why 16+1? This member is copied to the corresponding one in
-     * td_vbd_request_t, so check the limit of that, if there is one.
-     */
-    char name[16 + 1];
-
     struct timeval ts;
 
     /**
@@ -77,7 +71,7 @@ struct td_xenblkif_req {
 		gcopy_segs[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 };
 
-struct td_xenblkif;
+struct td_blkif_queue;
 
 /**
  * Queues the requests to the standard tapdisk queue.
@@ -87,17 +81,17 @@ struct td_xenblkif;
  * @param nr_reqs number of requests in the array
  */
 void
-tapdisk_xenblkif_queue_requests(struct td_xenblkif * const blkif,
+tapdisk_xenblkif_queue_requests(struct td_blkif_queue * const queue,
         blkif_request_t *reqs[], const int nr_reqs);
 
 /**
- * Initilises the intermediate requests of this block interface.
+ * Initilises the intermediate requests of this block queue.
  *
- * @params td_blkif the block interface whose requests must be initialised
+ * @params queue the queue whose requests must be initialised
  * @returns 0 on success
  */
 int
-tapdisk_xenblkif_reqs_init(struct td_xenblkif *td_blkif);
+tapdisk_xenblkif_reqs_init(struct td_blkif_queue* queue);
 
 /**
  * Releases all the requests of the block interface.
@@ -105,7 +99,7 @@ tapdisk_xenblkif_reqs_init(struct td_xenblkif *td_blkif);
  * @param blkif the block interface whose requests should be freed
  */
 void
-tapdisk_xenblkif_reqs_free(struct td_xenblkif * const blkif);
+tapdisk_xenblkif_reqs_free(struct td_blkif_queue * const queue);
 
 #define msg_to_tapreq(_req) \
 	container_of(_req, struct td_xenblkif_req, msg)

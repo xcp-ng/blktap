@@ -88,7 +88,7 @@ static int tdaio_get_image_info(int fd, td_disk_info_t *info)
 			(long long unsigned)info->size);
 	}
 
-	if (info->size == 0) {		
+	if (info->size == 0) {
 		info->size =((uint64_t) 16836057);
 		info->sector_size = DEFAULT_SECTOR_SIZE;
 	}
@@ -111,12 +111,13 @@ int tdaio_open(td_driver_t *driver, const char *name,
 
 	memset(prv, 0, sizeof(struct tdaio_state));
 
+	pthread_mutex_init(&prv->aio_lock, NULL);
 	prv->aio_free_count = MAX_AIO_REQS;
 	for (i = 0; i < MAX_AIO_REQS; i++)
 		prv->aio_free_list[i] = &prv->aio_requests[i];
 
 	/* Open the file */
-	o_flags = O_DIRECT | O_LARGEFILE | 
+	o_flags = O_DIRECT | O_LARGEFILE |
 		((flags & TD_OPEN_RDONLY) ? O_RDONLY : O_RDWR);
         fd = open(name, o_flags);
 
@@ -129,7 +130,7 @@ int tdaio_open(td_driver_t *driver, const char *name,
                                      "O_DIRECT! (%s)\n", name);
 
         } else if (fd != -1) DPRINTF("open(%s) with O_DIRECT\n", name);
-	
+
         if (fd == -1) {
 		DPRINTF("Unable to open [%s] (%d)!\n", name, 0 - errno);
         	ret = 0 - errno;
@@ -154,7 +155,10 @@ void tdaio_complete(void *arg, struct tiocb *tiocb, int err)
 	struct tdaio_state *prv = aio->state;
 
 	td_complete_request(aio->treq, err);
+
+	pthread_mutex_lock(&prv->aio_lock);
 	prv->aio_free_list[prv->aio_free_count++] = aio;
+	pthread_mutex_unlock(&prv->aio_lock);
 }
 
 void tdaio_queue_read(td_driver_t *driver, td_request_t treq)
@@ -168,10 +172,14 @@ void tdaio_queue_read(td_driver_t *driver, td_request_t treq)
 	size   = treq.secs * SECTOR_SIZE;
 	offset = treq.sec  * (uint64_t)SECTOR_SIZE;
 
-	if (prv->aio_free_count == 0)
+	pthread_mutex_lock(&prv->aio_lock);
+	if (prv->aio_free_count == 0) {
+		pthread_mutex_unlock(&prv->aio_lock);
 		goto fail;
+	}
+	aio = prv->aio_free_list[--prv->aio_free_count];
+	pthread_mutex_unlock(&prv->aio_lock);
 
-	aio        = prv->aio_free_list[--prv->aio_free_count];
 	aio->treq  = treq;
 	aio->state = prv;
 
@@ -196,10 +204,14 @@ void tdaio_queue_write(td_driver_t *driver, td_request_t treq)
 	size    = treq.secs * driver->info.sector_size;
 	offset  = treq.sec  * (uint64_t)driver->info.sector_size;
 
-	if (prv->aio_free_count == 0)
+	pthread_mutex_lock(&prv->aio_lock);
+	if (prv->aio_free_count == 0) {
+		pthread_mutex_unlock(&prv->aio_lock);
 		goto fail;
+	}
+	aio = prv->aio_free_list[--prv->aio_free_count];
+	pthread_mutex_unlock(&prv->aio_lock);
 
-	aio        = prv->aio_free_list[--prv->aio_free_count];
 	aio->treq  = treq;
 	aio->state = prv;
 
@@ -216,8 +228,9 @@ fail:
 int tdaio_close(td_driver_t *driver)
 {
 	struct tdaio_state *prv = (struct tdaio_state *)driver->data;
-	
+
 	close(prv->fd);
+	pthread_mutex_destroy(&prv->aio_lock);
 
 	return 0;
 }
@@ -233,12 +246,21 @@ int tdaio_validate_parent(td_driver_t *driver,
 	return -EINVAL;
 }
 
-void tdaio_stats(td_driver_t *driver, td_stats_t *st)
+int tdaio_pending(td_driver_t *driver)
 {
 	struct tdaio_state *prv = (struct tdaio_state *)driver->data;
 	int n_pending;
 
+	pthread_mutex_lock(&prv->aio_lock);
 	n_pending = MAX_AIO_REQS - prv->aio_free_count;
+	pthread_mutex_unlock(&prv->aio_lock);
+
+	return n_pending;
+}
+
+void tdaio_stats(td_driver_t *driver, td_stats_t *st)
+{
+	int n_pending = tdaio_pending(driver);
 
 	tapdisk_stats_field(st, "reqs", "{");
 	tapdisk_stats_field(st, "max", "lu", MAX_AIO_REQS);
@@ -248,7 +270,7 @@ void tdaio_stats(td_driver_t *driver, td_stats_t *st)
 
 struct tap_disk tapdisk_aio = {
 	.disk_type          = "tapdisk_aio",
-	.flags              = 0,
+	.flags              = TD_DRIVER_MULTIQUEUE,
 	.private_data_size  = sizeof(struct tdaio_state),
 	.td_open            = tdaio_open,
 	.td_close           = tdaio_close,
@@ -257,5 +279,6 @@ struct tap_disk tapdisk_aio = {
 	.td_get_parent_id   = tdaio_get_parent_id,
 	.td_validate_parent = tdaio_validate_parent,
 	.td_debug           = NULL,
+	.td_pending         = tdaio_pending,
 	.td_stats           = tdaio_stats,
 };

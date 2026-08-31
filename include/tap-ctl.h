@@ -31,7 +31,7 @@
 
 #define TAPCTL_COMM_RETRY_TIMEOUT 120
 
-extern int tap_ctl_debug;
+extern bool tap_ctl_debug;
 
 #ifdef TAPCTL
 #define DBG(_f, _a...)				\
@@ -98,9 +98,9 @@ int tap_ctl_find_minor(const char *type, const char *path);
 int tap_ctl_allocate(int *minor, char **devname);
 int tap_ctl_free(const int minor);
 
-int tap_ctl_create(const char *params, char **devname, int flags, 
+int tap_ctl_create(const char *params, char **devname, int flags,
 		   int prt_minor, char *secondary, int timeout, const char *logpath);
-int tap_ctl_destroy(const int id, const int minor, int force,
+int tap_ctl_destroy(const int id, const int minor, bool force,
 		    struct timeval *timeout);
 
 int tap_ctl_spawn(void);
@@ -112,7 +112,7 @@ int tap_ctl_detach(const int id, const int minor);
 int tap_ctl_open(const int id, const int minor, const char *params, int flags,
 		 const int prt_minor, const char *secondary, int timeout,
 		 const char *logpath, uint8_t key_size, uint8_t *encryption_key);
-int tap_ctl_close(const int id, const int minor, const int force,
+int tap_ctl_close(const int id, const int minor, const bool force,
 		  struct timeval *timeout);
 
 /**
@@ -160,8 +160,8 @@ int tap_ctl_cancel_commit_job(const int id, const int minor, bool wait);
  */
 int tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int
 		devid, int poll_duration, int poll_idle_threshold,
-		const grant_ref_t * grefs, const int order, const evtchn_port_t
-		port, int proto, const char *pool, const int minor);
+		const grant_ref_t grefs[][MAX_RING_PAGES], const int order, const int queues,
+		const evtchn_port_t* port, int proto, const char *pool, const int minor);
 
 /**
  * Instructs a tapdisk to disconnect from the shared ring.
@@ -183,11 +183,16 @@ int tap_ctl_disconnect_xenblkif(const pid_t pid, const domid_t domid,
  * @param sector_size output parameter that receives the size of the sector
  * @param info output parameter that receives the vdisk info flags VDISK_???,
  * defined in include/xen/interface/io/blkif.h
+ * @param discard output parameter that receives if discard is supported
+ * @param discard_granularity output parameter that receives the discard granularity
  * @param minor
  *
  */
-int tap_ctl_info(pid_t pid, unsigned long long *sectors, unsigned int
-		*sector_size, unsigned int *info, const int minor);
+int tap_ctl_info(pid_t pid, unsigned long long *sectors,
+		unsigned int *sector_size, unsigned int *info,
+		unsigned int *max_queues,
+		bool *discard, unsigned int *discard_granularity,
+		const int minor);
 
 /**
  * Parses a type:/path/to/file string, storing the type and path to the output

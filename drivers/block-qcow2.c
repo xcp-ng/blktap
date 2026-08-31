@@ -305,6 +305,8 @@ qcow2_open(void *opaque)
 	name = s->name;
 	flags = s->flags;
 
+        qemu_thread_naming(true);
+
 	err = qcow2_initialize(s, &local_err);
 	if (err) {
 		error_report("Initialization error: %s", error_get_pretty(local_err));
@@ -645,13 +647,14 @@ static inline void
 signal_completion(struct qcow2_request *r)
 {
 	struct qcow2_state *s = r->state;
-	td_vbd_t *vbd = r->treq.vreq->vbd;
+	td_vbd_queue_t *queue = r->treq.vreq->vqueue;
+	int notify;
 
-	td_complete_request(r->treq, r->error);
+	notify = td_complete_request(r->treq, r->error);
 	DBG(TLOG_DBG, "lsec: 0x%08"PRIx64", blk: 0x%04x, "
 		"err: %d\n", r->treq.sec, r->treq.secs, r->error);
-	if (r->error == 0) {
-		tapdisk_vbd_kick(vbd, true);
+	if (r->error == 0 && notify) {
+		tapdisk_vbd_kick(queue, true);
 		s->kick++;
 	}
 	free_qcow2_request(s, r);
@@ -951,12 +954,14 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 	}
 	if (top_bs == NULL) {
 		DPRINTF("qcow2_commit: top '%s' doesn't exist\n", req->top);
+		err = -EINVAL;
 		goto signal_commit;
 	}
 	top_node = top_bs->node_name;
 	base_bs = bdrv_backing_chain_next(top_bs);
 	if (base_bs == NULL) {
 		DPRINTF("qcow2_commit: no base to commit in\n");
+		err = -EINVAL;
 		goto signal_commit;
 	}
 	base_node = base_bs->node_name;
@@ -1035,6 +1040,7 @@ do_query_commit_job(struct qcow2_state *s, struct qcow2_request *req)
 	if (!bjob) {
 		job_unlock();
 		DPRINTF("Qcow2: no job running.\n");
+		err = -ENOENT;
 		goto signal;
 	}
 
@@ -1166,6 +1172,19 @@ qcow2_debug(td_driver_t *driver)
 #endif
 }
 
+static int
+qcow2_pending(td_driver_t *driver)
+{
+	struct qcow2_state *s = (struct qcow2_state *)driver->data;
+	int n_pending;
+
+	pthread_mutex_lock(&s->lock);
+	n_pending = QCOW2_REQS - s->vreq_free_count;
+	pthread_mutex_unlock(&s->lock);
+
+	return n_pending;
+}
+
 struct tap_disk tapdisk_qcow = {
 	.disk_type          = "tapdisk_qcow2",
 	.flags              = TD_DRIVER_THREADED,
@@ -1177,6 +1196,7 @@ struct tap_disk tapdisk_qcow = {
 	.td_queue_write     = qcow2_queue_write,
 	.td_get_parent_id   = qcow2_get_parent_id,
 	.td_validate_parent = qcow2_validate_parent,
+	.td_pending         = qcow2_pending,
 	.td_commit          = qcow2_commit,
 	.td_query_commit_job = qcow2_query_commit_job,
 	.td_cancel_commit_job = qcow2_cancel_commit_job,

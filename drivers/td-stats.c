@@ -29,9 +29,11 @@ tapdisk_xenblkif_stats(struct td_xenblkif * blkif, td_stats_t * st)
 {
     ASSERT(blkif);
     ASSERT(st);
-    ASSERT(blkif->ctx);
 
-    tapdisk_stats_field(st, "pool", "s", blkif->ctx->pool_name);
+    /* FIXME: pool_name is useless, there's only one pool; check that nobody is using
+     *        pool_name and remove it
+     */
+    //tapdisk_stats_field(st, "pool", "s",  blkif->ctx->pool_name);
     tapdisk_stats_field(st, "domid", "d", blkif->domid);
     tapdisk_stats_field(st, "devid", "d", blkif->devid);
 
@@ -51,4 +53,16 @@ tapdisk_xenblkif_stats(struct td_xenblkif * blkif, td_stats_t * st)
     tapdisk_stats_field(st, "vbd", "llu", blkif->stats.errors.vbd);
     tapdisk_stats_field(st, "img", "llu", blkif->stats.errors.img);
     tapdisk_stats_leave(st, '}');
+
+    tapdisk_stats_field(st, "queues", "[");
+    for (int i = 0; i < blkif->nr_queues; i++) {
+        struct td_blkif_queue* queue = &blkif->queues[i];
+
+
+        tapdisk_stats_enter(st, '{');
+        tapdisk_stats_field(st, "in", "llu", queue->stats.kicks.in);
+        tapdisk_stats_field(st, "out", "llu", queue->stats.kicks.out);
+        tapdisk_stats_leave(st, '}');
+    }
+    tapdisk_stats_leave(st, ']');
 }

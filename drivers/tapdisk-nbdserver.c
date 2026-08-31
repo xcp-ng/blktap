@@ -1223,8 +1223,7 @@ static td_vbd_request_t *create_request_vreq(
 	vreq->iov = &req->iov;
 	vreq->iov->secs = len >> SECTOR_SHIFT;
 	vreq->token = client;
-	vreq->name = req->id;
-	vreq->vbd = server->vbd;
+	vreq->vqueue = server->vqueue;
 
 	return vreq;
 
@@ -1336,7 +1335,7 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 		goto fail;
 	}
 
-	rc = tapdisk_vbd_queue_request(server->vbd, vreq);
+	rc = tapdisk_vbd_queue_request(server->vqueue->vbd, vreq, (td_queue_id_t)0, true); // TODO: suboptimal final argument
 	if (rc) {
 		ERR("tapdisk_vbd_queue_request failed: %d", rc);
 		goto fail;
@@ -1436,7 +1435,7 @@ tapdisk_nbdserver_alloc(td_vbd_t *vbd, td_disk_info_t info, nbd_protocol_style_t
 		goto fail;
 	}
 
-	server->vbd = vbd;
+	server->vqueue = &vbd->queues[0];
 	server->info = info;
 	server->fdrecv_listening_fd = -1;
 	server->fdrecv_listening_event_id = -1;
@@ -1450,13 +1449,13 @@ tapdisk_nbdserver_alloc(td_vbd_t *vbd, td_disk_info_t info, nbd_protocol_style_t
 
 	switch (style) {
 		case TAPDISK_NBD_PROTOCOL_OLD:
-			if (td_metrics_nbd_start_old(&server->nbd_stats, server->vbd->tap->minor)) {
+			if (td_metrics_nbd_start_old(&server->nbd_stats, vbd->tap->minor)) {
 				ERR("failed to create metrics file for nbdserver");
 				goto fail;
 			}
 			break;
 		case TAPDISK_NBD_PROTOCOL_NEW:
-			if (td_metrics_nbd_start_new(&server->nbd_stats, server->vbd->tap->minor)) {
+			if (td_metrics_nbd_start_new(&server->nbd_stats, vbd->tap->minor)) {
 				ERR("failed to create metrics file for nbdserver");
 				goto fail;
 			}

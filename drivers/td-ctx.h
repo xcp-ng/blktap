@@ -38,24 +38,13 @@
  * bottom line is that if we use one VBD per tapdisk this functionality is
  * unnecessary.
  */
-struct td_xenio_ctx {
+struct td_xenio_shared_ctx {
     char *pool_name;
 
     /**
      * Handle to the grant table driver.
      */
     xengnttab_handle *xcg_handle;
-
-    /**
-     * Handle to the event channel driver.
-     */
-    xenevtchn_handle *xce_handle;
-
-    /**
-     * Return value of tapdisk_server_register_event, we use this to tell
-     * whether the context is registered.
-     */
-    event_id_t ring_event;
 
     /**
      * block interfaces in this pool
@@ -68,6 +57,39 @@ struct td_xenio_ctx {
     struct list_head entry;
 
     int gntdev_fd;
+
+    /**
+     * Number of context pointing to that shared context
+     */
+    int count_ref;
+};
+
+struct td_xenio_ctx {
+    struct td_xenio_shared_ctx* shared;
+
+    /**
+     * Handle to the event channel driver.
+     */
+    xenevtchn_handle *xce_handle;
+
+    /**
+     * The local port corresponding to the remote port of the domain where the
+     * front-end is running. We use this to tell for which VBD a pending event
+     * is, and for notifying the front-end for responses we have produced and
+     * placed in the shared ring.
+     */
+    evtchn_port_t port;
+
+    /**
+     * Return value of tapdisk_server_register_event, we use this to tell
+     * whether the context is registered.
+     */
+    event_id_t ring_event;
+
+    /*
+     * TODO: kept, but might be of no use
+     */
+    int fd;
 };
 
 /**
@@ -77,25 +99,45 @@ struct td_xenio_ctx {
  * @returns 0 on success, -errno on error
  */
 int
-tapdisk_xenio_ctx_get(const char *pool_name, struct td_xenio_ctx ** _ctx);
+tapdisk_xenio_shared_ctx_get(const char *pool_name, struct td_xenio_shared_ctx ** _ctx);
 
 /**
  * Releases the pool, only if there is no block interface using it.
  */
 void
-tapdisk_xenio_ctx_put(struct td_xenio_ctx * ctx);
+tapdisk_xenio_shared_ctx_put(struct td_xenio_shared_ctx * ctx);
 
 /**
  * Process requests on the ring, if any. Returns the number of requests found.
  */
 int
-tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
-		struct td_xenio_ctx *ctx, int final);
+tapdisk_xenio_ctx_process_ring(struct td_blkif_queue *queue, bool final);
+
+/**
+ * Bind event-channel to queue, and allocate context.
+ * TODO: find a better naming, or split the function.
+ */
+struct td_xenio_ctx*
+tapdisk_xenio_ctx_bind_queue(struct td_xenio_shared_ctx* ctx, evtchn_port_t port,
+			     struct td_blkif_queue* queue);
+
+/**
+ * Unbind event-channel to queue, and free context.
+ * TODO: find a better naming, or split the function.
+ */
+void
+tapdisk_xenio_ctx_unbind_queue(struct td_xenio_ctx* ctx, struct td_blkif_queue* queue);
 
 /**
  * List of contexts.
  */
 extern struct list_head _td_xenio_ctxs;
+
+/*
+ * For each shared context in (static) context list
+ */
+#define tapdisk_xenio_for_each_ctx(_ctx) \
+	list_for_each_entry(_ctx, &_td_xenio_ctxs, entry)
 
 /**
  * For each block interface of this context...
@@ -108,16 +150,16 @@ extern struct list_head _td_xenio_ctxs;
  * Dead block interfaces are ignored.
  */
 #define tapdisk_xenio_ctx_find_blkif(_ctx, _blkif, _cond)	\
-	do {													\
-		int found = 0;										\
-		tapdisk_xenio_for_each_blkif(_blkif, _ctx) {		\
-			if (!_blkif->dead && _cond) {                   \
-				found = 1;									\
-				break;										\
-			}												\
-		}													\
-		if (!found)											\
-			_blkif = NULL;									\
-	} while (0)
+    do {							\
+	int found = 0;						\
+	tapdisk_xenio_for_each_blkif(_blkif, _ctx) {		\
+	    if (!_blkif->dead && _cond) {			\
+		found = 1;					\
+		break;						\
+	    }							\
+	}							\
+	if (!found)						\
+	    _blkif = NULL;					\
+    } while (0)
 
 #endif /* __TD_CTX_H__ */

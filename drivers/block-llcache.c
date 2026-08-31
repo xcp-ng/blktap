@@ -204,6 +204,8 @@ llpcache_requeue_treq(td_llpcache_t *s, td_llpcache_req_t *req, int target)
 {
 	struct llpcache_vreq *lvr;
 	td_vbd_request_t *vreq;
+	td_vbd_t *vbd;
+	td_queue_id_t qid;
 	int err;
 
 	lvr           = &req->lvr[target];
@@ -217,7 +219,11 @@ llpcache_requeue_treq(td_llpcache_t *s, td_llpcache_req_t *req, int target)
 	vreq->cb      = __llpcache_write_cb;
 	vreq->token   = s;
 
-	err = tapdisk_vbd_queue_request(req->treq.vreq->vbd, vreq);
+	vbd = req->treq.vreq->vqueue->vbd;
+	qid = req->treq.vreq->vqueue - vbd->queues;
+
+	// FIXME: maybe define another convenient API
+	err = tapdisk_vbd_queue_request(vbd, vreq, qid, true);  // TODO: suboptimal final argument
 	if (err)
 		goto fail;
 
@@ -505,9 +511,10 @@ fail:
 	return err;
 }
 
-static void
+static int
 __llecache_write_cb(td_request_t treq, int error)
 {
+	int notify = 0;
 	td_llecache_req_t *req = treq.cb_data;
 	td_llecache_t *s = req->s;
 
@@ -517,7 +524,7 @@ __llecache_write_cb(td_request_t treq, int error)
 	req->error    = ll_write_error(req->error, error);
 
 	if (req->pending)
-		return;
+		return notify;
 
 	if (req->error == -ENOSPC) {
 		ll_log_switch(DISK_TYPE_LLECACHE, req->error,
@@ -527,9 +534,11 @@ __llecache_write_cb(td_request_t treq, int error)
 		td_queue_write(s->shared, req->treq);
 
 	} else
-		td_complete_request(req->treq, error);
+		notify = td_complete_request(req->treq, error);
 
 	llecache_free_request(s, req);
+
+	return notify;
 }
 
 static void

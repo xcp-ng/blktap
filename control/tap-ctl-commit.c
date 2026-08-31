@@ -38,6 +38,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <getopt.h>
+#include <inttypes.h>
 
 #include "tap-ctl.h"
 #include "util.h"
@@ -90,7 +91,7 @@ tap_ctl_query_commit_job(const int id, const int minor)
 		return err;
 
 	if (message.type == TAPDISK_MESSAGE_QUERY_COMMIT_JOB_RSP) {
-		printf("Commit status '%s' (%lu/%lu)\n", message.u.query.status, message.u.query.current_progress, message.u.query.total_progress);
+		printf("Commit status '%s' (%" PRIu64 "/%" PRIu64 ")\n", message.u.query.status, message.u.query.current_progress, message.u.query.total_progress);
 		err = 0;
 	} else if (message.type == TAPDISK_MESSAGE_ERROR) {
 		err = -message.u.response.error;

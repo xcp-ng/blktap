@@ -40,6 +40,7 @@
 struct td_xenio_ctx;
 struct td_vbd_handle;
 struct td_xenblkif_stats;
+struct td_blkif_queue;
 
 struct td_xenblkif {
 
@@ -53,31 +54,13 @@ struct td_xenblkif {
      */
     int devid;
 
-
     /**
-	 * Pointer to the context this block interface belongs to.
-	 */
-    struct td_xenio_ctx *ctx;
-
-    /**
-	 * allows struct td_blkif's to be linked into lists, for whomever needs to
-	 * maintain multiple struct td_blkif's
-	 */
+     * allows struct td_blkif's to be linked into lists, for whomever needs to
+     * maintain multiple struct td_blkif's
+     */
     struct list_head entry_ctx;
 
     struct list_head entry;
-
-    /**
-     * The local port corresponding to the remote port of the domain where the
-     * front-end is running. We use this to tell for which VBD a pending event
-     * is, and for notifying the front-end for responses we have produced and
-     * placed in the shared ring.
-     */
-	/*
-	 * FIXME shoud be evtchn_port_or_error_t, which is declared in
-	 * xenctrl.h. Including xenctrl.h conflicts with xen_blkif.h.
-	 */
-     int port;
 
     /**
      * protocol (native, x86, or x64)
@@ -85,48 +68,103 @@ struct td_xenblkif {
      */
     int proto;
 
-    blkif_back_rings_t rings;
-
     /**
-     * Grant references of the ring that holds the request descriptors.
-     * See ring_n_pages below to know the number of used refs in this array.
+     * Number of instanciated queues
      */
-    grant_ref_t ring_ref[MAX_RING_PAGES];
+    int nr_queues;
+
+    struct td_blkif_queue {
+        blkif_back_rings_t rings;
+
+        /**
+         * Pointer to the context this block interface belongs to.
+         */
+        struct td_xenio_ctx *ctx;
+
+        /**
+         * Grant references of the ring that holds the request descriptors.
+         * See ring_n_pages below to know the number of used refs in this array.
+         */
+        grant_ref_t ring_ref[MAX_RING_PAGES];
+
+        /*
+         * Size of the each rings, expressed in number of requests.
+         * Common to each queues.
+         * TODO Do we really need to keep this around?
+         */
+        int ring_size;
+
+        /**
+         * Intermediate requests. The array is managed as a stack, with n_reqs_free
+         * pointing to the top of the stack, at the next available intermediate
+         * request.
+         */
+        struct td_xenblkif_req *reqs;
+
+        /**
+         * Protect requests list
+         */
+        pthread_mutex_t mutex;
+
+        /**
+         * Stack pointer to the aforementioned stack.
+         */
+        int n_reqs_free;
+
+        blkif_request_t **reqs_free;
+
+        /**
+         * Request buffer cache.
+         */
+        void **reqs_bufcache;
+        unsigned n_reqs_bufcache_free;
+        event_id_t reqs_bufcache_evtid;
+
+        struct {
+            /**
+             * Pointer to he pending barrier request.
+             */
+            blkif_request_t *msg;
+
+            /**
+             * Tells whether the write I/O part of a barrier request (if any) has
+             * completed.
+             */
+            bool io_done;
+
+            /**
+             * I/O error code for the write I/O part of a barrier request (if any).
+             */
+            int io_err;
+        } barrier;
+
+        event_id_t chkrng_event;
+        event_id_t stoppolling_event;
+
+        bool in_polling;
+
+        /**
+         * NOTE: reuse an already defined struct but not every fields are used.
+         */
+        struct td_xenblkif_stats stats;
+
+        /**
+         * Back pointer to the block interface owning the queue
+         */
+        struct td_xenblkif* blkif;
+
+    } queues[BLKIF_MAX_QUEUES];
 
     /**
-     * Number of pages in the ring that holds the request descriptors.
+     * Number of pages in each rings that holds the request descriptors.
+     * Common to each queues.
      */
     unsigned int ring_n_pages;
-
-    /*
-     * Size of the ring, expressed in requests.
-     * TODO Do we really need to keep this around?
-     */
-    int ring_size;
-
-    /**
-     * Intermediate requests. The array is managed as a stack, with n_reqs_free
-     * pointing to the top of the stack, at the next available intermediate
-     * request.
-     */
-    struct td_xenblkif_req *reqs;
-
-    /**
-     * Stack pointer to the aforementioned stack.
-     */
-    int n_reqs_free;
-
-    blkif_request_t **reqs_free;
 
     /**
      * Pointer to the actual VBD.
      */
     struct td_vbd_handle *vbd;
-
-    /**
-     * Protect requests list
-     */
-    pthread_mutex_t mutex;
 
     /**
      * stats
@@ -157,37 +195,8 @@ struct td_xenblkif {
         time_t last;
     } xenvbd_stats;
 
-    /**
-     * Request buffer cache.
-     */
-    void **reqs_bufcache;
-    unsigned n_reqs_bufcache_free;
-    event_id_t reqs_bufcache_evtid;
-
 	bool dead;
 
-	struct {
-		/**
-		 * Pointer to he pending barrier request.
-		 */
-		blkif_request_t *msg;
-
-		/**
-		 * Tells whether the write I/O part of a barrier request (if any) has
-		 * completed.
-		 */
-		bool io_done;
-
-		/**
-		 * I/O error code for the write I/O part of a barrier request (if any).
-		 */
-		int io_err;
-	} barrier;
-
-	event_id_t chkrng_event;
-	event_id_t stoppolling_event;
-
-	bool in_polling;
 	int poll_duration; /* microseconds; 0 means no polling. */
 	int poll_idle_threshold;
 };
@@ -199,10 +208,6 @@ struct td_xenblkif {
 #define RING_ERR(blkif, fmt, args...)                                       \
     EPRINTF("%d/%d, ring=%p: "fmt, (blkif)->domid, (blkif)->devid, (blkif), \
         ##args);
-
-/* TODO rename from xenio */
-#define tapdisk_xenio_for_each_ctx(_ctx) \
-	list_for_each_entry(_ctx, &_td_xenio_ctxs, entry)
 
 /**
  * Connects the tapdisk to the shared ring.
@@ -221,9 +226,11 @@ struct td_xenblkif {
  * @returns 0 on success
  */
 int
-tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
-        int order, evtchn_port_t port, int proto, int poll_duration,
-        int poll_idle_threshold, const char *pool, td_vbd_t * vbd);
+tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX_RING_PAGES],
+                         int order, int nr_queues, evtchn_port_t* ports, bool persistent_grant,
+                         unsigned int indirect_max_segments,
+                         int proto, int poll_duration, int poll_idle_threshold,
+                         const char *pool, td_vbd_t * vbd);
 
 /**
  * Disconnects the tapdisk from the shared ring.
@@ -265,21 +272,21 @@ tapdisk_xenblkif_find(const domid_t domid, const int devid);
  * shared as well.
  */
 extern event_id_t
-tapdisk_xenblkif_evtchn_event_id(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_evtchn_event_id(const struct td_blkif_queue *queue);
 
 /**
  * Returns the event ID associated wit checking the ring. This is a private
  * event.
  */
 extern event_id_t
-tapdisk_xenblkif_chkrng_event_id(const struct td_xenblkif * const blkif);
+tapdisk_xenblkif_chkrng_event_id(const struct td_blkif_queue * const queue);
 
 /**
  * Returns the event ID associated with stopping polling. This is a private
  * event.
  */
 extern event_id_t
-tapdisk_xenblkif_stoppolling_event_id(const struct td_xenblkif * const blkif);
+tapdisk_xenblkif_stoppolling_event_id(const struct td_blkif_queue * const queue);
 
 /**
  * Updates ring stats.
@@ -304,43 +311,57 @@ tapdisk_xenblkif_resume(struct td_xenblkif * const blkif);
  * Tells how many requests are pending.
  */
 int
-tapdisk_xenblkif_reqs_pending(const struct td_xenblkif * const blkif);
+tapdisk_xenblkif_reqs_pending(const struct td_blkif_queue * const queue);
 
 /**
  * Schedules the cessation of polling.
  */
 void
-tapdisk_xenblkif_sched_stoppolling(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_sched_stoppolling(const struct td_blkif_queue *queue);
 
 /**
  * Unschedules the cessation of polling.
  */
 void
-tapdisk_xenblkif_unsched_stoppolling(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_unsched_stoppolling(const struct td_blkif_queue *queue);
 
 /**
- * Start polling now.
+ * Start polling the queue now.
  */
 void
-tapdisk_start_polling(struct td_xenblkif *blkif);
+tapdisk_start_polling(struct td_blkif_queue *queue);
+
+/**
+ * Start polling all queues now.
+ */
+void
+tapdisk_start_polling_all_queues(struct td_xenblkif *blkif);
 
 /**
  * Schedules a ring check.
  */
 void
-tapdisk_xenblkif_sched_chkrng(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_sched_chkrng(const struct td_blkif_queue *queue);
 
 /**
  * Unschedules the ring check.
  */
 void
-tapdisk_xenblkif_unsched_chkrng(const struct td_xenblkif *blkif);
+tapdisk_xenblkif_unsched_chkrng(const struct td_blkif_queue *queue);
 
 /**
  * Tells whether a barrier request can be completed.
  */
 bool
 tapdisk_xenblkif_barrier_should_complete(
-		const struct td_xenblkif * const blkif);
+		const struct td_blkif_queue * const queue);
+
+/*
+ * Return index of the queue
+ */
+static inline td_queue_id_t
+tapdisk_xenblkif_queue_id(const struct td_blkif_queue* queue) {
+    return queue - queue->blkif->queues;
+}
 
 #endif /* __TD_BLKIF_H__ */

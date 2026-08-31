@@ -30,6 +30,7 @@
 #include <sys/mman.h>
 #include <sys/vfs.h>
 
+#include "debug.h"
 #include "vhd.h"
 #include "td-req.h"
 #include "tapdisk.h"
@@ -260,6 +261,7 @@ lcache_store_read(td_lcache_t *cache, td_lcache_req_t *req)
 	td_vbd_request_t *vreq;
 	struct td_iovec *iov;
 	td_vbd_t *vbd;
+	td_queue_id_t qid;
 	int err;
 
 	iov          = &req->iov;
@@ -275,31 +277,39 @@ lcache_store_read(td_lcache_t *cache, td_lcache_req_t *req)
 	vreq->token  = cache;
 	vreq->skip_mirror = true;
 
-	vbd = req->treq.vreq->vbd;
+	ASSERT(req->treq.vreq->vqueue);
+	ASSERT(req->treq.vreq->vqueue->vbd);
+	vbd = req->treq.vreq->vqueue->vbd;
+	qid = req->treq.vreq->vqueue - vbd->queues;
 
-	err = tapdisk_vbd_queue_request(vbd, vreq);
+	// FIXME: maybe define another convenient API
+	err = tapdisk_vbd_queue_request(vbd, vreq, qid, true);  // TODO: suboptimal final argument
 	BUG_ON(err);
 }
 
-static void
+static int
 lcache_complete_read(td_lcache_t *cache, td_lcache_req_t *req)
 {
+	int notify;
+
 	if (likely(!req->err)) {
 		size_t sz = (size_t)req->treq.secs << SECTOR_SHIFT;
 		memcpy(req->treq.buf, req->buf, sz);
 	}
 
-	td_complete_request(req->treq, req->err);
+	notify = td_complete_request(req->treq, req->err);
 
 	if (unlikely(req->err) || !lcache_wr_enabled(cache)) {
 		lcache_free_request(cache, req);
-		return;
+		return notify;
 	}
 
 	lcache_store_read(cache, req);
+
+	return notify;
 }
 
-static void
+static int
 __lcache_read_cb(td_request_t treq, int err)
 {
 	td_lcache_req_t *req = treq.cb_data;
@@ -310,7 +320,8 @@ __lcache_read_cb(td_request_t treq, int err)
 	req->err   = req->err ? : err;
 
 	if (!req->secs)
-		lcache_complete_read(cache, req);
+		return lcache_complete_read(cache, req);
+	return 0;
 }
 
 static void

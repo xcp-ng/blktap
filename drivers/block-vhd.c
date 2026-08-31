@@ -2677,11 +2677,10 @@ vhd_debug(td_driver_t *driver)
 	for (i = 0; i < VHD_REQS_DATA; i++) {
 		struct vhd_request *r = &s->vreq_list[i];
 		td_request_t *t       = &r->treq;
-		const char *vname     = t->vreq ? t->vreq->name: NULL;
 		if (t->secs)
-			DBG(TLOG_WARN, "%d: vreq: %s.%d, err: %d, op: %d,"
+			DBG(TLOG_WARN, "%d: vreq: %d, err: %d, op: %d,"
 			    " lsec: 0x%08"PRIx64", flags: %d, this: %p, "
-			    "next: %p, tx: %p\n", i, vname, t->sidx, r->error, r->op,
+			    "next: %p, tx: %p\n", i, t->sidx, r->error, r->op,
 			    t->sec, r->flags, r, r->next, r->tx);
 	}
 
@@ -2732,6 +2731,14 @@ vhd_debug(td_driver_t *driver)
 */
 }
 
+static int
+vhd_pending(td_driver_t *driver)
+{
+	struct vhd_state *s = (struct vhd_state *)driver->data;
+
+	return VHD_REQS_DATA - s->vreq_free_count;
+}
+
 struct tap_disk tapdisk_vhd = {
 	.disk_type          = "tapdisk_vhd",
 	.flags              = 0,
@@ -2744,5 +2751,6 @@ struct tap_disk tapdisk_vhd = {
 	.td_queue_write     = vhd_queue_write,
 	.td_get_parent_id   = vhd_get_parent_id,
 	.td_validate_parent = vhd_validate_parent,
+	.td_pending         = vhd_pending,
 	.td_debug           = vhd_debug,
 };

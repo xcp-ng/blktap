@@ -172,7 +172,7 @@ tap_ctl_allocate_device(int *minor, char **devname)
 	char *name;
 	int fd, err;
 	struct blktap2_handle handle;
-	char free_devname = 0;
+	bool free_devname = false;
 
 	*minor = -1;
 	if (!devname)
@@ -216,7 +216,7 @@ tap_ctl_allocate_device(int *minor, char **devname)
 			goto fail;
 		}
 		*devname = name;
-		free_devname = 1;
+		free_devname = true;
 	}
 
 	err = tap_ctl_make_device(name, handle.device,
