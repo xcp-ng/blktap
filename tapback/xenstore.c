@@ -120,6 +120,27 @@ tapback_device_read_otherend(vbd_t * const device, xs_transaction_t xst,
 }
 
 int
+tapback_device_scanf(vbd_t * const device, xs_transaction_t xst,
+        const char * const path, const char * const fmt, ...)
+{
+    va_list ap;
+    int n = 0;
+    char *s = NULL;
+
+    ASSERT(device);
+    ASSERT(path);
+
+    if (!(s = tapback_device_read(device, xst, path)))
+        return -1;
+    va_start(ap, fmt);
+    n = vsscanf(s, fmt, ap);
+    free(s);
+    va_end(ap);
+
+    return n;
+}
+
+int
 tapback_device_scanf_otherend(vbd_t * const device, xs_transaction_t xst,
         const char * const path, const char * const fmt, ...)
 {

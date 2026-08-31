@@ -101,6 +101,7 @@ int pretty_time(char *buf, unsigned char buf_len);
 #define MODE_KEY		"mode"
 #define POLLING_DURATION	"polling-duration"
 #define POLLING_IDLE_THRESHOLD	"polling-idle-threshold"
+#define MULTI_QUEUE_MAX_QUEUES	"multi-queue-max-queues"
 
 /*
  * TODO Put the rest of the front-end nodes defined in blkif.h here and group
@@ -194,15 +195,20 @@ typedef struct backend {
 
     char *pidfile;
 
-	/**
-	 * Tells whether we support write I/O barriers.
-	 */
-	bool barrier;
+    /**
+     * Tells whether we support write I/O barriers.
+     */
+    bool barrier;
 
-	/**
-	 * Tells whether we support discard.
-	 */
-	bool discard;
+    /**
+     * Tells whether we support multi-queue.
+     */
+    bool multiqueue;
+
+    /**
+     * Tells whether we support discard.
+     */
+    bool discard;
 } backend_t;
 
 /**
@@ -376,6 +382,20 @@ int
 tapback_device_printf(vbd_t * const device, xs_transaction_t xst,
         const char * const key, const bool mkread, const char * const fmt,
         ...);
+
+/**
+ * Reads the specified XenStore path under the back-end directory of the VBD in
+ * a scanf-like manner.
+ *
+ * @param device the VBD
+ * @param xst XenStore transaction
+ * @param path XenStore path to read
+ * @param fmt format
+ * @returns the number of items converted, or -1 if the path can't be read
+ */
+int
+tapback_device_scanf(vbd_t * const device, xs_transaction_t xst,
+        const char * const path, const char * const fmt, ...);
 
 /**
  * Reads the specified XenStore path under the front-end directory in a

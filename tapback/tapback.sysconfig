@@ -1,0 +1,11 @@
+# Extra command line options of tapback (see tapback --help), added after the
+# ones of tapback.service. Restart the service to apply them:
+#
+#   systemctl restart tapback
+#
+# -q: use a single queue for every VBD, i.e. disable multi-queue
+# -b: disable the barriers
+# -v: verbose
+#
+# TAPBACK_OPTS="-q"
+TAPBACK_OPTS=""

@@ -202,7 +202,7 @@ tapback_backend_create_device(backend_t *backend,
     vbd_t *device = NULL;
     int err = 0;
 
-	ASSERT(backend);
+    ASSERT(backend);
     ASSERT(name);
 
     DBG(NULL, "%s creating device\n", name);
@@ -213,7 +213,7 @@ tapback_backend_create_device(backend_t *backend,
         goto out;
     }
 
-	device->backend = backend;
+    device->backend = backend;
     list_add_tail(&device->backend_entry,
             &device->backend->slave.slave.devices);
 
@@ -376,6 +376,50 @@ done:
 }
 
 /**
+ * Set the max number of queues of the VBD and announce it to the front-end in
+ * its multi-queue-max-queues key.
+ *
+ * The toolstack can lower it for a VBD by writing the key before us, e.g.
+ * from its other-config: 1 makes the VBD single-queue. A value outside of
+ * [1, tapdisk's max] is ignored. The -q option sets it to 1 for all the VBDs.
+ *
+ * The key is written again with the value we keep, even if unchanged, to make
+ * it readable by the front-end.
+ */
+static int
+device_announce_queues(vbd_t * const device)
+{
+    unsigned int max = device->max_queues, v = 0;
+    const int n = tapback_device_scanf(device, XBT_NULL, MULTI_QUEUE_MAX_QUEUES,
+            "%u", &v);
+    const bool present = n >= 0;
+    int err = 0;
+
+    if (n == 1 && v >= 1 && v <= max)
+        max = v;
+    else if (present)
+        WARN(device, "ignoring %s, not a number in [1, %u]\n",
+                MULTI_QUEUE_MAX_QUEUES, max);
+
+    if (!device->backend->multiqueue)
+        max = 1;
+    if (max != device->max_queues)
+        INFO(device, "limiting the queues to %u, was %u\n", max,
+                device->max_queues);
+    device->max_queues = max;
+
+    if (max > 1 || present) {
+        err = tapback_device_printf(device, XBT_NULL, MULTI_QUEUE_MAX_QUEUES,
+                true, "%u", max);
+        if (err)
+            WARN(device, "failed to write %s: %s\n", MULTI_QUEUE_MAX_QUEUES,
+                    strerror(-err));
+    }
+
+    return err;
+}
+
+/**
  * Retrieves the minor number and locates the corresponding tapdisk, storing
  * all relevant information in @device. Then, it attempts to advance the Xenbus
  * state as it might be that everything is ready and all that was missing was
@@ -497,13 +541,8 @@ physical_device_changed(vbd_t *device) {
         goto out;
     }
 
-    /* Enable multi-queue */
-    if (device->max_queues > 1) {
-	if ((err = tapback_device_printf(device, XBT_NULL, "multi-queue-max-queues", true, "%d",
-					 device->max_queues))) {
-	    WARN(device, "failed to write multi-queue-max-queues: %s\n", strerror(-err));
-	    goto out;
-	}
+    if ((err = device_announce_queues(device))) {
+        goto out;
     }
 
 	err = tapback_device_printf(device, XBT_NULL, "kthread-pid", false, "%d",
@@ -823,7 +862,7 @@ tapback_backend_probe_device(backend_t *backend,
     vbd_t *device = NULL;
     char * s = NULL;
 
-	ASSERT(backend);
+    ASSERT(backend);
     ASSERT(devname);
 
     ASSERT(!tapback_is_master(backend));
@@ -1203,7 +1242,8 @@ tapback_backend_handle_backend_watch(backend_t *backend,
                  * FIXME Shall we watch the child process?
                  */
             } else { /* child */
-                char *args[7];
+                /* name -d -x <domid> [-v] [-b] [-q] NULL */
+                char *args[8];
                 int i = 0;
 
                 args[i++] = (char*)tapback_name;
@@ -1217,8 +1257,10 @@ tapback_backend_handle_backend_watch(backend_t *backend,
                 }
                 if (log_level == LOG_DEBUG)
                     args[i++] = "-v";
-				if (!backend->barrier)
-					args[i++] = "-b";
+		if (!backend->barrier)
+		    args[i++] = "-b";
+		if (!backend->multiqueue)
+		    args[i++] = "-q";
                 args[i] = NULL;
                 /*
                  * TODO we're hard-coding the name of the binary, better let

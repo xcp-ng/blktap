@@ -16,6 +16,8 @@ tapback_SOURCES += tapback.h
 tapback_SOURCES += tapback.c
 tapback_SOURCES += tapback.service
 
+EXTRA_DIST = tapback.sysconfig
+
 tapback_LDADD  = -lxenstore
 tapback_LDADD += $(top_srcdir)/control/libblktapctl.la
 
@@ -23,11 +25,14 @@ tapback_LDADD += $(top_srcdir)/control/libblktapctl.la
 # Have "exec" in name to ensure it's done trough the install-exec route
 # (and before install-exec-local)
 SYSTEMD_SERVICE_DIR = /usr/lib/systemd/system
+SYSCONFIG_DIR = $(sysconfdir)/sysconfig
 
 install-exec-local:
 	mkdir -p $(DESTDIR)$(SYSTEMD_SERVICE_DIR)
 	install -m 644 tapback.service \
 	  $(DESTDIR)$(SYSTEMD_SERVICE_DIR)
+	mkdir -p $(DESTDIR)$(SYSCONFIG_DIR)
+	install -m 644 tapback.sysconfig $(DESTDIR)$(SYSCONFIG_DIR)/tapback
 
 clean-local:
 	-rm -rf *.gc??

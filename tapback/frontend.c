@@ -203,6 +203,14 @@ connect_tap(vbd_t * const device)
         goto out;
     }
 
+    /* The front-end ignores the multi-queue-max-queues we announced */
+    if (device->max_queues && nr_queues > (int)device->max_queues) {
+        WARN(device, "%d queues requested, at most %u allowed.\n", nr_queues,
+                device->max_queues);
+        err = EINVAL;
+        goto out;
+    }
+
     if (!(grefs = calloc(nr_queues, sizeof(grant_ref_t[MAX_RING_PAGES])))) {
         WARN(device, "failed to allocate memory for grant refs.\n");
         err = ENOMEM;

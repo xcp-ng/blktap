@@ -5,7 +5,8 @@ Requires=xenstored.service
 
 [Service]
 Type=forking
-ExecStart=/usr/bin/tapback -p /var/run/tapback.pid
+EnvironmentFile=-/etc/sysconfig/tapback
+ExecStart=/usr/bin/tapback -p /var/run/tapback.pid $TAPBACK_OPTS
 PIDFile = /var/run/tapback.pid
 
 [Install]

@@ -86,6 +86,7 @@ cat /usr/lib/udev/rules.d/65-md-incremental.rules >> /etc/udev/rules.d/65-md-inc
 %{_sysconfdir}/xensource/bugtool/tapdisk-logs/description.xml
 %{_localstatedir}/log/blktap
 %{_unitdir}/tapback.service
+%config(noreplace) %{_sysconfdir}/sysconfig/tapback
 %{_unitdir}/cpumond.service
 
 %files devel
