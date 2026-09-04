@@ -98,10 +98,6 @@ static void commit_abort(Job *job)
      * after the failed/cancelled commit job is gone? If we already wrote
      * something to base, the intermediate images aren't valid any more. */
     bdrv_graph_rdlock_main_loop();
-    if (!s->commit_top_bs->backing) {
-        bdrv_graph_rdunlock_main_loop();
-        return;
-    }
     commit_top_backing_bs = s->commit_top_bs->backing->bs;
     bdrv_graph_rdunlock_main_loop();
 
@@ -128,6 +124,13 @@ static void commit_clean(Job *job)
 
     g_free(s->backing_file_str);
     blk_unref(s->top);
+
+    /*
+     * Release the reference taken in commit_start(). On the success path the
+     * filter node is already detached from its parents, so this is the last
+     * reference to it.
+     */
+    bdrv_unref(s->commit_top_bs);
 }
 
 static int coroutine_fn commit_run(Job *job, Error **errp)
@@ -330,12 +333,21 @@ void commit_start(const char *job_id, BlockDriverState *bs,
     commit_top_bs->total_sectors = top->total_sectors;
 
     ret = bdrv_append(commit_top_bs, top, errp);
-    bdrv_unref(commit_top_bs); /* referenced by new parents or failed */
     if (ret < 0) {
+        bdrv_unref(commit_top_bs);
         commit_top_bs = NULL;
         goto fail;
     }
 
+    /*
+     * Keep the creation reference for the whole lifetime of the job instead of
+     * relying on the parent links alone: bdrv_drop_intermediate() moves those
+     * parents to base and then drops the last reference, which deletes the
+     * node while s->commit_top_bs still points at it. commit_abort() would
+     * then run on freed memory.
+     * The reference is released in commit_clean() (or in the fail branch of
+     * this function if it fails).
+     */
     s->commit_top_bs = commit_top_bs;
 
     /*
@@ -446,6 +458,11 @@ fail:
         bdrv_replace_node(commit_top_bs, top, &error_abort);
         bdrv_graph_wrunlock();
         bdrv_drained_end(top);
+        /*
+         * commit_clean() does not run for a job that failed to start, so the
+         * reference kept for the job lifetime is released here.
+         */
+        bdrv_unref(commit_top_bs);
     }
 }
 
