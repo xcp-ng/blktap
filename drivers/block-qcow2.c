@@ -519,6 +519,7 @@ _qcow2_open(td_driver_t *driver, const char *name,
 
 	pthread_mutex_lock(&s->lock);
 	s->driver_opened = true;
+	qemu_thread_naming(true);
 	qemu_thread_create(&s->thread, "td-qcow2", qcow2_open, s,
 			   QEMU_THREAD_JOINABLE);
 
