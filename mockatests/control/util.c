@@ -33,6 +33,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 
 #include <sys/un.h>
@@ -80,12 +81,12 @@ struct mock_ipc_params *setup_ipc(char *ipc_socket_name, int ipc_socket_fd,
 	ipc_params->saddr.sun_family = AF_UNIX;
 	strcpy(ipc_params->saddr.sun_path, ipc_socket_name);
 
-	expect_value(__wrap_socket, domain, AF_UNIX);
-	expect_value(__wrap_socket, type, SOCK_STREAM);
+	expect_int_value(__wrap_socket, domain, AF_UNIX);
+	expect_int_value(__wrap_socket, type, SOCK_STREAM);
 	expect_any(__wrap_socket, protocol);
 	will_return(__wrap_socket, ipc_socket_fd);
 
-	expect_value(__wrap_connect, sockfd, ipc_socket_fd);
+	expect_int_value(__wrap_connect, sockfd, ipc_socket_fd);
 	expect_memory(__wrap_connect, addr,
 		      &(ipc_params->saddr), sizeof(ipc_params->saddr));
 	will_return(__wrap_connect, 0);
@@ -95,7 +96,7 @@ struct mock_ipc_params *setup_ipc(char *ipc_socket_name, int ipc_socket_fd,
 	expect_any(__wrap_select, timeout);
 	will_return(__wrap_select, &(ipc_params->write_select_params));
 
-	expect_value(__wrap_write, fd, ipc_socket_fd);
+	expect_int_value(__wrap_write, fd, ipc_socket_fd);
 	expect_memory(__wrap_write, buf,
 		      &(ipc_params->write_message), sizeof(tapdisk_message_t));
 	will_return(__wrap_write, 1024);
@@ -114,11 +115,11 @@ struct mock_ipc_params *setup_ipc(char *ipc_socket_name, int ipc_socket_fd,
 
 		ipc_params->read_params[id].result = sizeof(*read_message);
 		ipc_params->read_params[id].data = &(ipc_params->read_message[id]);
-		expect_value(__wrap_read, fd, ipc_socket_fd);
+		expect_int_value(__wrap_read, fd, ipc_socket_fd);
 		will_return(__wrap_read, &(ipc_params->read_params[id]));
 	}
 
-	expect_value(__wrap_close, fd, ipc_socket_fd);
+	expect_int_value(__wrap_close, fd, ipc_socket_fd);
 	will_return(__wrap_close, 0);
 
 	return ipc_params;

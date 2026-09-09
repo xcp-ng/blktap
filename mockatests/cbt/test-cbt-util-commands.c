@@ -32,6 +32,7 @@
 #include <stdarg.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 
 #include <cbt-util-priv.h>
 #include <wrappers.h>
@@ -122,7 +123,7 @@ test_help_success(void ** state)
 
 	help();
 
-	assert_in_range(output->offset, 10, 1024);
+	assert_int_in_range(output->offset, 10, 1024);
 
 	free_printf_data(output);
 }

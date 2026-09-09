@@ -33,6 +33,8 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
+#include <cmocka-compat.h>
+
 #include "tapdisk.h"
 #include "tapdisk-interface.h"
 
@@ -45,16 +47,16 @@ __wrap_tapdisk_image_check_request(td_image_t *image, td_vbd_request_t *vreq)
 void
 __wrap_td_queue_block_status(td_image_t *image, td_request_t *treq)
 {
-	check_expected(treq);
+	check_expected_ptr(treq);
 }
 
 int
 __wrap_send(int fd, void* buf, size_t size, int flags)
 {
-	check_expected(buf);
-	check_expected(fd);
-	check_expected(size);
-	check_expected(flags);
+	check_expected_ptr(buf);
+	check_expected_int(fd);
+	check_expected_uint(size);
+	check_expected_int(flags);
 	return (int)mock();
 }
 
@@ -62,7 +64,7 @@ event_id_t
 __wrap_tapdisk_server_register_event(char mode, int fd,
                               struct timeval timeout, event_cb_t cb, void *data)
 {
-	check_expected(mode);
+	check_expected_int(mode);
 	check_expected_ptr(cb);
 	return 0;
 }

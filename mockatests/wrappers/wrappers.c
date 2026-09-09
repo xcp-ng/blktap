@@ -35,6 +35,7 @@
 #include <stddef.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <cmocka-compat.h>
 #include <errno.h>
 
 #include <wrappers.h>
@@ -123,7 +124,7 @@ __wrap_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)
 		size_t remaining = data->size - data->offset;
 		size_t len = size * nmemb;
 
-		assert_in_range(len, 0, remaining);
+		assert_int_in_range(len, 0, remaining);
 		memcpy(data->buf + data->offset, ptr, len);
 
 		data->offset += len;
@@ -147,7 +148,7 @@ struct fwrite_data *setup_fwrite_mock(int size)
 	data->buf = buf;
 	data->type = stdout;
 
-	will_return_always(__wrap_fwrite, data);
+	will_return_ptr_always(__wrap_fwrite, data);
 
 	return data;
 }
@@ -167,7 +168,7 @@ wrap_vprintf(const char *format, va_list ap)
 		struct printf_data *data = mock_ptr_type(struct printf_data *);
 		int remaining = data->size - data->offset;
 		int len = vsnprintf(data->buf + data->offset, remaining, format, ap);
-		assert_in_range(len, 0, remaining);
+		assert_int_in_range(len, 0, remaining);
 		data->offset += len;
 		return len;
 	} else {
@@ -224,7 +225,7 @@ struct printf_data *setup_vprintf_mock(int size)
 	data->offset = 0;
 	data->buf = buf;
 
-	will_return_always(wrap_vprintf, data);
+	will_return_ptr_always(wrap_vprintf, data);
 
 	mock_vprintf = 1;
 

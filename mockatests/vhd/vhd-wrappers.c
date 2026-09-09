@@ -33,6 +33,8 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
+#include <cmocka-compat.h>
+
 #include "libvhd.h"
 #include "vhd-wrappers.h"
 
@@ -104,7 +106,7 @@ int __wrap_vhd_get_keyhash(vhd_context_t *ctx, struct vhd_keyhash* hash)
 
 int __wrap_vhd_close(vhd_context_t *ctx)
 {
-	check_expected(ctx);
+	check_expected_ptr(ctx);
 	close_count++;
 	return (int)mock();
 }
@@ -160,7 +162,7 @@ __wrap_free(void *ptr)
 		/*fprintf(stderr, "Freeing block at %p\n", ptr);*/
 		test_free(ptr);
 	} else {
-		check_expected(ptr);
+		check_expected_ptr(ptr);
 		__real_free(ptr);
 	}
 }
