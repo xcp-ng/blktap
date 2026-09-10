@@ -356,6 +356,10 @@ qcow2_open(void *opaque)
         // Disable snapshot-table as we don't use internal snapshots
 	qdict_put_str(options, "overlap-check", "constant");
 	qdict_put_str(options, "overlap-check.snapshot-table", "off");
+        // Cache setting for 2TB image with 64k cluster size
+        // or 16TB image with 1M cluster size and subclusters
+	qdict_put_str(options, "l2-cache-size", "256M");
+	qdict_put_str(options, "refcount-cache-size", "65664K");
 
 	if (has_aio_native) {
 		has_discard = true;
