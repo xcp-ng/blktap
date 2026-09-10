@@ -310,6 +310,10 @@ qcow2_open(void *opaque)
 	qdict_put_str(file_layer, "filename", name);
 
 	qdict_put_str(options, "driver", "qcow2");
+        // Disable linear time overlap checks
+        // Disable snapshot-table as we don't use internal snapshots
+	qdict_put_str(options, "overlap-check", "constant");
+	qdict_put_str(options, "overlap-check.snapshot-table", "off");
 
 	if (has_aio_native) {
 		has_discard = true;
