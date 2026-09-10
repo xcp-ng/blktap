@@ -434,7 +434,7 @@ tapdisk_xenblkif_unsched_chkrng(struct td_xenblkif *blkif)
 	pthread_mutex_lock(&blkif->mutex_chkrng);
 	if (likely(!blkif->chkrng_pending)) {
 		err = tapdisk_server_event_set_timeout(
-				tapdisk_xenblkif_chkrng_event_id(blkif), TV_INF);
+				tapdisk_xenblkif_chkrng_event_id(blkif), TV_SECS(8));
 		ASSERT(!err);
 	}
 	pthread_mutex_unlock(&blkif->mutex_chkrng);
