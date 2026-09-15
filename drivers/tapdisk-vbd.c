@@ -170,13 +170,13 @@ tapdisk_vbd_first_image(td_vbd_t *vbd)
 static inline td_image_t *
 tapdisk_vbd_first_non_log_image(td_vbd_t *vbd)
 {
-	td_image_t *image = NULL, *tmp;
+	td_image_t *image, *tmp;
 
 	tapdisk_vbd_for_each_image(vbd, image, tmp)
 		if (image->type != DISK_TYPE_LOG)
 			return image;
 
-	return image;
+	return NULL;
 }
 
 static inline td_image_t *
