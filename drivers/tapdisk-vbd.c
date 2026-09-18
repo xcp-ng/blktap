@@ -1685,8 +1685,6 @@ int
 tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 {
 	td_image_t *image;
-	td_request_t treq;
-	bzero(&treq, sizeof(treq));
 	td_sector_t sec;
 	int i, err;
 
@@ -1712,9 +1710,11 @@ tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 		goto fail;
 	}
 
-	for (i = 0; i < vreq->iovcnt; i++) {
-		struct td_iovec *iov = &vreq->iov[i];
+	for (i = vreq->iovcnt - 1; i >= 0; i--) {
+		struct td_iovec *iov = &vreq->iov[vreq->iovcnt - i - 1];
+		td_request_t treq;
 
+		bzero(&treq, sizeof(treq));
 		treq.sidx           = i;
 		treq.buf            = iov->base;
 		treq.sec            = sec;
@@ -2028,19 +2028,18 @@ tapdisk_vbd_kick(td_vbd_t *vbd, bool scheduler_kick)
 		prev->cb(prev, prev->error, prev->token, 1);
 		vbd->returned++;
 	}
+	pthread_mutex_unlock(&vbd->mutex);
 
 	if (scheduler_kick && td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED)) {
 		static uint64_t token = 1;
 
 		if (vbd->efd < 0) {
-		    pthread_mutex_unlock(&vbd->mutex);
 		    return;
 		}
 
 		s = write(vbd->efd, &token, sizeof(uint64_t));
 		ASSERT(s == sizeof(uint64_t));
 	}
-	pthread_mutex_unlock(&vbd->mutex);
 }
 
 int
