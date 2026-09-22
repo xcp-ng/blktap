@@ -1307,7 +1307,7 @@ qcow2_pending(td_driver_t *driver)
 
 struct tap_disk tapdisk_qcow = {
 	.disk_type          = "tapdisk_qcow2",
-	.flags              = TD_DRIVER_THREADED,
+	.flags              = TD_DRIVER_THREADED | TD_DRIVER_MULTIQUEUE,
 	.private_data_size  = sizeof(struct qcow2_state),
 	.td_open            = _qcow2_open,
 	.td_close           = _qcow2_close,
