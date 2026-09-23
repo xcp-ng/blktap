@@ -576,8 +576,7 @@ _qcow2_open(td_driver_t *driver, const char *name,
 	qemu_thread_create(&s->thread, "td-qcow2", qcow2_open, s,
 			   QEMU_THREAD_JOINABLE);
 
-	while (s->open_status == 0)
-		pthread_cond_wait(&s->cond, &s->lock);
+	pthread_cond_wait(&s->cond, &s->lock);
 	err = s->open_status;
 	s->open_status = 0;
 	pthread_mutex_unlock(&s->lock);
@@ -677,7 +676,6 @@ static inline void
 init_qcow2_request(struct qcow2_state *s, struct qcow2_request *req)
 {
 	req->state = s;
-	req->error = -1;
 #if DEBUGGING != 0
 	req->id = req - s->vreq_list;
 	gettimeofday(&req->allocate_tv, NULL);
@@ -1000,11 +998,9 @@ qcow2_commit(td_driver_t *driver, const char *name)
 	pthread_mutex_unlock(&s->lock);
 
 	pthread_mutex_lock(&s->commit_lock);
-
 	if (!req->done) {
 		qemu_bh_schedule(s->bh);
-		while (req->error == -1)
-			pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 	}
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
@@ -1088,8 +1084,7 @@ qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 	pthread_mutex_lock(&s->commit_lock);
 	if (!req->done) {
 		qemu_bh_schedule(s->bh);
-		while (req->error == -1)
-			pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 	}
 
 	if (query) {
@@ -1189,8 +1184,7 @@ qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 	pthread_mutex_lock(&s->commit_lock);
 	if (!req->done) {
 		qemu_bh_schedule(s->bh);
-		while (req->error == -1)
-			pthread_cond_wait(&s->commit_cond, &s->commit_lock);
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 	}
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
