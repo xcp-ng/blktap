@@ -194,6 +194,30 @@ fail:
 	return err;
 }
 
+/*
+ * Make sure the output buffer can hold at least size bytes. Must be called
+ * before anything is written to it.
+ */
+static int
+tapdisk_ctl_conn_reserve(struct tapdisk_ctl_conn *conn, size_t size)
+{
+	void *buf;
+
+	if (size <= conn->out.bufsz)
+		return 0;
+
+	buf = realloc(conn->out.buf, size);
+	if (!buf)
+		return -ENOMEM;
+
+	conn->out.buf   = buf;
+	conn->out.bufsz = size;
+	conn->out.prod  = buf;
+	conn->out.cons  = buf;
+
+	return 0;
+}
+
 static int
 tapdisk_ctl_conn_connected(struct tapdisk_ctl_conn *conn)
 {
@@ -553,7 +577,7 @@ tapdisk_control_list(struct tapdisk_ctl_conn *conn,
 {
 	td_vbd_t *vbd;
 	struct list_head *head;
-	int count;
+	int count, err;
 
     ASSERT(conn);
     ASSERT(request);
@@ -567,6 +591,10 @@ tapdisk_control_list(struct tapdisk_ctl_conn *conn,
 	count = 0;
 	list_for_each_entry(vbd, head, next)
 		count++;
+
+	err = tapdisk_ctl_conn_reserve(conn, (count + 1) * sizeof(*response));
+	if (err)
+		return td_err_set_errno(error, err);
 
 	list_for_each_entry(vbd, head, next) {
 		response->u.list.count   = count--;
@@ -1133,7 +1161,7 @@ tapdisk_control_stats(struct tapdisk_ctl_conn *conn,
 	td_vbd_t *vbd;
 	ssize_t rv;
 	void *buf;
-	int new_size;
+	int err;
 
     ASSERT(conn);
     ASSERT(request);
@@ -1175,19 +1203,10 @@ tapdisk_control_stats(struct tapdisk_ctl_conn *conn,
 		goto out;
 	}
 
-	if (rv > conn->out.bufsz - sizeof(*response)) {
-		ASSERT(conn->out.prod == conn->out.buf);
-		ASSERT(conn->out.cons == conn->out.buf);
-		new_size = rv + sizeof(*response);
-		buf = realloc(conn->out.buf, new_size);
-		if (!buf) {
-			rv = -ENOMEM;
-			goto out;
-		}
-		conn->out.buf = buf;
-		conn->out.bufsz = new_size;
-		conn->out.prod = buf;
-		conn->out.cons = buf;
+	err = tapdisk_ctl_conn_reserve(conn, rv + sizeof(*response));
+	if (err) {
+		rv = err;
+		goto out;
 	}
 	if (rv > 0) {
 		memcpy(conn->out.buf + sizeof(*response), st->buf, rv);
