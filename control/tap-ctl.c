@@ -669,6 +669,7 @@ tap_cli_pause(int argc, char **argv, td_err *error)
 			timeout = tap_cli_timeout(optarg);
 			if (!timeout)
 				goto usage;
+			break;
 		case '?':
 			goto usage;
 		case 'h':
