@@ -60,6 +60,20 @@ struct td_xenblkif_stats {
 		unsigned long long deadline_us_sum; /* sum of armed deadlines, / arms = mean */
 	} kick_defer;
 
+	/* ring polling */
+	struct {
+		unsigned long long starts;        /* polling periods entered */
+		unsigned long long denied;        /* refused by the idle-CPU admission */
+		unsigned long long expired;       /* windows that ended without a request */
+		unsigned long long rearmed;       /* expired with requests in flight (TD_APOLL_INFLIGHT) */
+		unsigned long long wakeups;       /* requests that arrived while not polling */
+		unsigned long long grows;
+		unsigned long long shrinks;
+		unsigned long long block_ns_sum;  /* idle time preceding the wakeups */
+		unsigned long long polled_ns;     /* time spent polling */
+		unsigned long long window_us_sum; /* window in force at each start */
+	} poll;
+
 	struct blkback_stats *xenvbd;
 };
 

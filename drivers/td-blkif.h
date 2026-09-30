@@ -57,6 +57,8 @@ struct td_xenblkif_stats;
 #define TD_KICK_DEFER_ADAPTIVE   2 /* deadline = 4 x smoothed inter-group interval, clamped */
 #define TD_KICK_DEFER_LOAD_AWARE 4 /* deadline / 4 while dom0 idle < polling idle threshold */
 
+#define TD_APOLL_INFLIGHT 1 /* keep polling while requests are outstanding */
+
 struct td_xenblkif {
 
     /**
@@ -242,6 +244,25 @@ struct td_xenblkif {
 	event_id_t kick_defer_event;
 	bool kick_defer_armed;
 	int poll_idle_threshold;
+
+	/*
+	 * Adaptive polling window (microseconds). When apoll_max is non-zero the
+	 * stop-polling deadline is apoll_cur instead of poll_duration. apoll_cur
+	 * grows by apoll_grow when a request arrives less than apoll_max after
+	 * polling stopped, and shrinks (divided by apoll_shrink, or reset to
+	 * apoll_min) when it arrives later. apoll_grow == 0: fixed window of
+	 * apoll_max. Prototype knob: /etc/tapdisk-poll.conf, read at connect.
+	 * TD_APOLL_INFLIGHT: an expired window is re-armed while requests are
+	 * outstanding, so their completions are caught without a wake-up.
+	 */
+	unsigned int apoll_max;
+	unsigned int apoll_min;
+	unsigned int apoll_grow;
+	unsigned int apoll_shrink;
+	unsigned int apoll_cur;
+	unsigned int apoll_mode;  /* TD_APOLL_* */
+	long long apoll_stop_ns;  /* CLOCK_MONOTONIC when polling last stopped */
+	long long apoll_start_ns; /* when the current polling period started */
 };
 
 #define RING_DEBUG(blkif, fmt, args...)                                     \

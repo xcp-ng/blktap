@@ -63,6 +63,24 @@ tapdisk_xenblkif_stats(struct td_xenblkif * blkif, td_stats_t * st)
     tapdisk_stats_field(st, "img", "llu", blkif->stats.errors.img);
     tapdisk_stats_leave(st, '}');
 
+    tapdisk_stats_field(st, "poll", "{");
+    tapdisk_stats_field(st, "mode", "u", blkif->apoll_mode);
+    tapdisk_stats_field(st, "max_us", "u", blkif->apoll_max);
+    tapdisk_stats_field(st, "min_us", "u", blkif->apoll_min);
+    tapdisk_stats_field(st, "cur_us", "u", blkif->apoll_cur);
+    tapdisk_stats_field(st, "duration_us", "d", blkif->poll_duration);
+    tapdisk_stats_field(st, "starts", "llu", blkif->stats.poll.starts);
+    tapdisk_stats_field(st, "denied", "llu", blkif->stats.poll.denied);
+    tapdisk_stats_field(st, "expired", "llu", blkif->stats.poll.expired);
+    tapdisk_stats_field(st, "rearmed", "llu", blkif->stats.poll.rearmed);
+    tapdisk_stats_field(st, "wakeups", "llu", blkif->stats.poll.wakeups);
+    tapdisk_stats_field(st, "grows", "llu", blkif->stats.poll.grows);
+    tapdisk_stats_field(st, "shrinks", "llu", blkif->stats.poll.shrinks);
+    tapdisk_stats_field(st, "block_ns_sum", "llu", blkif->stats.poll.block_ns_sum);
+    tapdisk_stats_field(st, "polled_ns", "llu", blkif->stats.poll.polled_ns);
+    tapdisk_stats_field(st, "window_us_sum", "llu", blkif->stats.poll.window_us_sum);
+    tapdisk_stats_leave(st, '}');
+
     tapdisk_stats_field(st, "kick_defer", "{");
     tapdisk_stats_field(st, "max_usecs", "u", blkif->kick_defer_max_usecs);
     tapdisk_stats_field(st, "max_held", "u", blkif->kick_defer_max_held);

@@ -36,6 +36,7 @@
 #include <sys/prctl.h>
 #include <libgen.h>
 #include <zlib.h>
+#include <time.h>
 
 #include "blktap-xenif.h"
 #include "debug.h"
@@ -340,7 +341,8 @@ tapdisk_xenblkif_sched_stoppolling(const struct td_xenblkif *blkif)
 	ASSERT(blkif);
 
 	err = tapdisk_server_event_set_timeout(
-		tapdisk_xenblkif_stoppolling_event_id(blkif), TV_USECS(blkif->poll_duration));
+		tapdisk_xenblkif_stoppolling_event_id(blkif),
+		TV_USECS(blkif->apoll_max ? (int)blkif->apoll_cur : blkif->poll_duration));
 	ASSERT(!err);
 }
 
@@ -357,13 +359,69 @@ tapdisk_xenblkif_unsched_stoppolling(const struct td_xenblkif *blkif)
 }
 
 
+static inline long long
+tapdisk_xenblkif_poll_now_ns(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+/*
+ * Adapts the polling window from the idle time that preceded a request
+ * arriving while not polling: grow if a longer window would have caught
+ * it, shrink if polling that long would have been wasted.
+ */
+static void
+tapdisk_xenblkif_poll_adapt(struct td_xenblkif *blkif, long long now)
+{
+    long long block;
+    unsigned int w;
+
+    if (!blkif->apoll_stop_ns)
+        return;
+
+    block = now - blkif->apoll_stop_ns;
+    blkif->stats.poll.wakeups++;
+    blkif->stats.poll.block_ns_sum += block;
+
+    if (!blkif->apoll_grow)
+        return;
+
+    if (block < (long long)blkif->apoll_max * 1000) {
+        if (blkif->apoll_cur < blkif->apoll_max) {
+            w = blkif->apoll_cur * blkif->apoll_grow;
+            blkif->apoll_cur = w > blkif->apoll_max ? blkif->apoll_max : w;
+            blkif->stats.poll.grows++;
+        }
+    } else if (blkif->apoll_cur > blkif->apoll_min) {
+        w = blkif->apoll_shrink ? blkif->apoll_cur / blkif->apoll_shrink
+                : blkif->apoll_min;
+        blkif->apoll_cur = w < blkif->apoll_min ? blkif->apoll_min : w;
+        blkif->stats.poll.shrinks++;
+    }
+}
+
 void
 tapdisk_start_polling(struct td_xenblkif *blkif)
 {
+    long long now = 0;
+
     ASSERT(blkif);
+
+    if (blkif->apoll_max && !blkif->in_polling) {
+        now = tapdisk_xenblkif_poll_now_ns();
+        tapdisk_xenblkif_poll_adapt(blkif, now);
+    }
 
     /* Only enter polling if the CPU utilisation is not too high */
     if (tapdisk_server_system_idle_cpu() > (float)blkif->poll_idle_threshold) {
+        if (now) {
+            blkif->apoll_start_ns = now;
+            blkif->stats.poll.starts++;
+            blkif->stats.poll.window_us_sum += blkif->apoll_cur;
+        }
         blkif->in_polling = true;
 
         /* Start checking the ring immediately */
@@ -372,7 +430,18 @@ tapdisk_start_polling(struct td_xenblkif *blkif)
         /* Schedule the future 'stop polling' event */
         tapdisk_xenblkif_sched_stoppolling(blkif);
 
-	tapdisk_server_mask_event(tapdisk_xenblkif_evtchn_event_id(blkif), 1);
+	/*
+	 * The event belongs to the context and is shared by every ring of this
+	 * process: masking it while one ring polls starves the others (round 15,
+	 * shared tapdisk). With the notification fix a polled ring does not notify
+	 * anyway, so leave it unmasked when the knob is active.
+	 */
+	if (!blkif->apoll_max)
+		tapdisk_server_mask_event(tapdisk_xenblkif_evtchn_event_id(blkif), 1);
+    } else if (now) {
+        /* not polling: the next arrival measures the inter-arrival gap */
+        blkif->apoll_stop_ns = now;
+        blkif->stats.poll.denied++;
     }
 }
 
@@ -384,10 +453,29 @@ tapdisk_xenblkif_cb_stoppolling(event_id_t id __attribute__((unused)),
 
     ASSERT(blkif);
 
+    /*
+     * Requests outstanding: their completions are due soon, keep polling
+     * for them rather than take a wake-up (TD_APOLL_INFLIGHT).
+     */
+    if ((blkif->apoll_mode & TD_APOLL_INFLIGHT)
+            && blkif->n_reqs_free != blkif->ring_size) {
+        blkif->stats.poll.rearmed++;
+        tapdisk_xenblkif_sched_stoppolling(blkif);
+        return;
+    }
+
     /* Process the ring one final time, setting the event counter */
     if (!tapdisk_xenio_ctx_process_ring(blkif, blkif->ctx, 1)) {
         /* If there were no new requests this time, then stop polling */
         blkif->in_polling = false;
+
+        if (blkif->apoll_max) {
+            long long now = tapdisk_xenblkif_poll_now_ns();
+
+            blkif->stats.poll.expired++;
+            blkif->stats.poll.polled_ns += now - blkif->apoll_start_ns;
+            blkif->apoll_stop_ns = now;
+        }
 
         /*
          * Stop obsessively checking the ring.
@@ -405,7 +493,8 @@ tapdisk_xenblkif_cb_stoppolling(event_id_t id __attribute__((unused)),
         /* Make the 'stop polling' event not fire again */
         tapdisk_xenblkif_unsched_stoppolling(blkif);
 
-	tapdisk_server_mask_event(tapdisk_xenblkif_evtchn_event_id(blkif), 0);
+        if (!blkif->apoll_max)
+            tapdisk_server_mask_event(tapdisk_xenblkif_evtchn_event_id(blkif), 0);
     }
 }
 
@@ -509,6 +598,48 @@ tapdisk_xenblkif_kick_defer_config(struct td_xenblkif *blkif)
     }
 }
 
+/*
+ * Prototype knob: /etc/tapdisk-poll.conf holds "<max> [<min> [<grow> [<shrink> [<mode>]]]]"
+ * in microseconds (defaults 1, 2, 0). grow 0 = fixed window of <max>; shrink 0 =
+ * reset to <min>; mode bit 0 = keep polling while requests are outstanding.
+ * Absent or unreadable, or polling disabled for the VBD =
+ * the stock fixed polling-duration window. A product version would take
+ * this from the VBD other-config like polling-duration.
+ */
+static void
+tapdisk_xenblkif_poll_config(struct td_xenblkif *blkif)
+{
+    FILE *f = fopen("/etc/tapdisk-poll.conf", "r");
+    unsigned int max = 0, min = 1, grow = 2, shrink = 0, mode = 0;
+
+    blkif->apoll_max = 0;
+    blkif->apoll_mode = 0;
+    blkif->apoll_cur = 0;
+    blkif->apoll_stop_ns = 0;
+    blkif->apoll_start_ns = 0;
+    if (!f)
+        return;
+    if (fscanf(f, "%u %u %u %u %u", &max, &min, &grow, &shrink, &mode) < 1)
+        max = 0;
+    fclose(f);
+    if (!max || !blkif->poll_duration)
+        return;
+    if (!min)
+        min = 1;
+    if (min > max)
+        min = max;
+    if (grow == 1)
+        grow = 0;
+    blkif->apoll_max = max;
+    blkif->apoll_min = min;
+    blkif->apoll_grow = grow;
+    blkif->apoll_shrink = shrink;
+    blkif->apoll_cur = grow ? min : max;
+    blkif->apoll_mode = mode;
+    RING_DEBUG(blkif, "adaptive polling: window %u..%u us, grow x%u, shrink /%u, mode %u\n",
+            min, max, grow, shrink, mode);
+}
+
 int
 tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
         int order, evtchn_port_t port, int proto, int poll_duration,
@@ -559,6 +690,7 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
 	tapdisk_xenblkif_kick_defer_config(td_blkif);
 	td_blkif->poll_duration = poll_duration;
 	td_blkif->poll_idle_threshold = poll_idle_threshold;
+	tapdisk_xenblkif_poll_config(td_blkif);
 	td_blkif->barrier.msg = NULL;
 	td_blkif->barrier.io_done = false;
 	td_blkif->barrier.io_err = 0;
