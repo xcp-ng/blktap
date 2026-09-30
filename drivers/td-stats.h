@@ -51,13 +51,13 @@ struct td_xenblkif_stats {
 
 	/* deferred kick */
 	struct {
-		unsigned long long pushes;
-		unsigned long long notifies;
-		unsigned long long holds;
-		unsigned long long deadlines;
-		unsigned long long arms;
-		unsigned long long arms_short;
-		unsigned long long deadline_us_sum;
+		unsigned long long pushes;          /* response pushes, immediate or deadline */
+		unsigned long long notifies;        /* event channel notifications sent */
+		unsigned long long holds;           /* group ends whose push was held */
+		unsigned long long deadlines;       /* deadlines that fired */
+		unsigned long long arms;            /* deadlines armed */
+		unsigned long long arms_short;      /* shortened by TD_KICK_DEFER_LOAD_AWARE */
+		unsigned long long deadline_us_sum; /* sum of armed deadlines, / arms = mean */
 	} kick_defer;
 
 	struct blkback_stats *xenvbd;
