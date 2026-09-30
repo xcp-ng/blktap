@@ -284,7 +284,16 @@ tapdisk_xenio_ctx_process_ring(struct td_blkif_queue *queue, bool final)
         queue->n_reqs_free -= n_reqs;
         ASSERT(queue->n_reqs_free <= queue->ring_size);
         limit -= n_reqs;
-        final = 1;
+
+        /*
+         * While polling, the ring's event channel is masked and the
+         * stop-polling callback performs the final check (re-arming
+         * req_event) before we go back to sleep. Re-arming here would only
+         * make the frontend issue a notification hypercall per request that
+         * nobody waits for.
+         */
+        if (!queue->in_polling)
+            final = 1;
 
         if (unlikely(reqs[(n_reqs - 1)]->operation ==
                      BLKIF_OP_WRITE_BARRIER)) {
