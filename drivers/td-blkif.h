@@ -166,6 +166,9 @@ struct td_xenblkif {
 
         bool in_polling;
 
+        event_id_t kick_defer_event;
+        bool kick_defer_armed;
+
         /**
          * NOTE: reuse an already defined struct but not every fields are used.
          */
@@ -229,6 +232,17 @@ struct td_xenblkif {
 	 * requests.
 	 */
 	unsigned int indirect_max_segments;
+
+	/*
+	 * Deferred kick: hold the response push while at least
+	 * kick_defer_max_held requests are in flight, until that many responses
+	 * are ready or kick_defer_max_usecs elapsed since the first held one.
+	 * 0 for either = off.
+	 * Given by tapback (XenStore keys kick-defer-duration and
+	 * kick-defer-count) at connect.
+	 */
+	unsigned int kick_defer_max_usecs;
+	unsigned int kick_defer_max_held;
 };
 
 #define RING_DEBUG(blkif, fmt, args...)                                     \
@@ -251,6 +265,10 @@ struct td_xenblkif {
  * @param proto protocol (native, x86, or x64)
  * @param poll_duration polling duration (microseconds; 0 means no polling)
  * @param poll_idle_threshold CPU threshold above which we permit polling
+ * @param kick_defer_duration maximum time in microseconds a response is held
+ * (0 means no deferral)
+ * @param kick_defer_count number of held responses that ends the deferral
+ * (0 means no deferral)
  * @param pool name of the context
  * @param vbd the VBD
  * @returns 0 on success
@@ -260,6 +278,8 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
                          int order, int nr_queues, evtchn_port_t* ports, bool persistent_grant,
                          unsigned int indirect_max_segments,
                          int proto, int poll_duration, int poll_idle_threshold,
+                         unsigned int kick_defer_duration,
+                         unsigned int kick_defer_count,
                          const char *pool, td_vbd_t * vbd);
 
 /**
@@ -327,6 +347,12 @@ tapdisk_xenblkif_chkrng_event_id(const struct td_blkif_queue * const queue);
  */
 extern event_id_t
 tapdisk_xenblkif_stoppolling_event_id(const struct td_blkif_queue * const queue);
+
+/**
+ * Deferred kick deadline callback; registered in td-blkif.c.
+ */
+void
+tapdisk_xenblkif_cb_kick_deadline(event_id_t id, char mode, void *private);
 
 /**
  * Updates ring stats.

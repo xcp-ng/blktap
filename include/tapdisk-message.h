@@ -177,6 +177,13 @@ typedef struct tapdisk_message_blkif {
 	 * Maximum number of segments per page in indirect requests.
 	 */
 	uint32_t indirect_max_segments;
+
+	/**
+	 * Deferred kick: maximum time in microseconds a response is held, and
+	 * number of responses that ends it (0 for either means no deferral).
+	 */
+	uint32_t kick_defer_duration;
+	uint32_t kick_defer_count;
 } tapdisk_message_blkif_t;
 
 /**

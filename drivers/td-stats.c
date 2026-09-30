@@ -62,6 +62,18 @@ tapdisk_xenblkif_stats(struct td_xenblkif * blkif, td_stats_t * st)
         tapdisk_stats_enter(st, '{');
         tapdisk_stats_field(st, "in", "llu", queue->stats.kicks.in);
         tapdisk_stats_field(st, "out", "llu", queue->stats.kicks.out);
+
+        tapdisk_stats_field(st, "kick_defer", "{");
+        tapdisk_stats_field(st, "max_usecs", "u", blkif->kick_defer_max_usecs);
+        tapdisk_stats_field(st, "max_held", "u", blkif->kick_defer_max_held);
+        /* stats */
+        tapdisk_stats_field(st, "pushes", "llu", queue->stats.kick_defer.pushes);
+        tapdisk_stats_field(st, "notifies", "llu", queue->stats.kick_defer.notifies);
+        tapdisk_stats_field(st, "holds", "llu", queue->stats.kick_defer.holds);
+        tapdisk_stats_field(st, "deadlines", "llu", queue->stats.kick_defer.deadlines);
+        tapdisk_stats_field(st, "arms", "llu", queue->stats.kick_defer.arms);
+        tapdisk_stats_leave(st, '}');
+
         tapdisk_stats_leave(st, '}');
     }
     tapdisk_stats_leave(st, ']');

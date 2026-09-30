@@ -157,6 +157,10 @@ int tap_ctl_cancel_commit_job(const int id, const int minor, bool wait);
  * single event channel is used.
  * @param indirect_max_segments maximum number of segments of an indirect
  * request, as announced to the front-end (0: no indirect requests)
+ * @param kick_defer_duration maximum time in microseconds a response is held
+ * before notifying the front-end (0 means no deferral)
+ * @param kick_defer_count number of held responses that ends the deferral
+ * (0 means no deferral)
  * @param minor
  * @returns 0 on success, a negative error code otherwise
  */
@@ -164,7 +168,9 @@ int tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int
 		devid, int poll_duration, int poll_idle_threshold,
 		const grant_ref_t grefs[][MAX_RING_PAGES], const int order, const int queues,
 		const evtchn_port_t* port, int proto, const char *pool,
-		const unsigned int indirect_max_segments, const int minor);
+		const unsigned int indirect_max_segments,
+		const unsigned int kick_defer_duration,
+		const unsigned int kick_defer_count, const int minor);
 
 /**
  * Instructs a tapdisk to disconnect from the shared ring.

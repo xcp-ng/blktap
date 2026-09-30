@@ -109,6 +109,18 @@ int pretty_time(char *buf, unsigned char buf_len);
 #define MODE_KEY		"mode"
 #define POLLING_DURATION	"polling-duration"
 #define POLLING_IDLE_THRESHOLD	"polling-idle-threshold"
+#define KICK_DEFER_DURATION	"kick-defer-duration"
+#define KICK_DEFER_COUNT	"kick-defer-count"
+
+/*
+ * Deferred kick settings used when the keys are absent: hold a response at
+ * most 80 us, or until 8 responses are ready. Both did best in fio
+ * measurements on qcow2 over an SSD; shorter or longer values gained less.
+ * The count is also the number of requests in flight needed to hold a
+ * response, so low queue depths are not delayed.
+ */
+#define TAPBACK_KICK_DEFER_DURATION	80
+#define TAPBACK_KICK_DEFER_COUNT	8
 #define MULTI_QUEUE_MAX_QUEUES	"multi-queue-max-queues"
 
 /*
@@ -334,6 +346,13 @@ typedef struct vbd {
 	 * Idle CPU threshold above which polling is permitted.
 	 */
 	int polling_idle_threshold;
+
+	/**
+	 * Deferred kick: maximum time in microseconds a response is held
+	 * (0 means no deferral), and number of responses that ends it.
+	 */
+	unsigned int kick_defer_duration;
+	unsigned int kick_defer_count;
 
 	/*
 	 * FIXME rename to backend_state

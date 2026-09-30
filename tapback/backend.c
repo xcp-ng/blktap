@@ -225,6 +225,8 @@ tapback_backend_create_device(backend_t *backend,
 	device->info = 0;
 	device->polling_duration = 0;
 	device->polling_idle_threshold = 0;
+	device->kick_defer_duration = TAPBACK_KICK_DEFER_DURATION;
+	device->kick_defer_count = TAPBACK_KICK_DEFER_COUNT;
 
     /* TODO check for errors */
     device->devid = atoi(name);
@@ -646,6 +648,23 @@ out:
 }
 
 /**
+ * Reads an unsigned integer from the key of the VBD. Leaves @value unchanged
+ * when the key is not there.
+ */
+static void
+device_read_uint(vbd_t * const device, const char * const key,
+        unsigned int * const value)
+{
+    unsigned int v;
+    const int n = tapback_device_scanf(device, XBT_NULL, key, "%u", &v);
+
+    if (n == 1)
+        *value = v;
+    else if (n >= 0)
+        WARN(device, "ignoring %s, not a number\n", key);
+}
+
+/**
  * Reads the hotplug-status XenStore key from the back-end and attemps to
  * connect to the front-end.
  *
@@ -731,6 +750,10 @@ hotplug_status_changed(vbd_t * const device) {
         polling_idle_threshold = tapback_device_read(device, XBT_NULL, POLLING_IDLE_THRESHOLD);
         if (polling_idle_threshold)
             device->polling_idle_threshold = atoi(polling_idle_threshold);
+
+        /* Deferred kick: the defaults unless the keys are set, 0 disables it. */
+        device_read_uint(device, KICK_DEFER_DURATION, &device->kick_defer_duration);
+        device_read_uint(device, KICK_DEFER_COUNT, &device->kick_defer_count);
 
         /*
          * Attempt to connect as everything may be ready and the only thing the

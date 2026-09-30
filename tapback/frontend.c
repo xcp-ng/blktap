@@ -287,7 +287,9 @@ connect_tap(vbd_t * const device)
     if ((err = -tap_ctl_connect_xenblkif(device->tap->pid, device->domid,
                     device->devid, device->polling_duration, device->polling_idle_threshold,
                     grefs, order, nr_queues, ports, proto, NULL,
-                    device->backend->indirect_segments, device->minor))) {
+                    device->backend->indirect_segments,
+                    device->kick_defer_duration, device->kick_defer_count,
+                    device->minor))) {
         /*
          * This happens if the tapback dameon gets restarted while there are
          * active VBDs.

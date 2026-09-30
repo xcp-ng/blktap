@@ -222,6 +222,11 @@ tapdisk_xenblkif_destroy(struct td_xenblkif * blkif)
             queue->stoppolling_event = -1;
         }
 
+        if (queue->kick_defer_event >= 0) {
+            tapdisk_server_unregister_io_event(qid, queue->kick_defer_event);
+            queue->kick_defer_event = -1;
+        }
+
         tapdisk_xenblkif_reqs_free(queue);
 
       	pthread_mutex_destroy(&queue->mutex_chkrng);
@@ -561,6 +566,8 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
                          int order, int nr_queues, evtchn_port_t* ports, bool persistent_grant,
                          unsigned int indirect_max_segments,
                          int proto, int poll_duration, int poll_idle_threshold,
+                         unsigned int kick_defer_duration,
+                         unsigned int kick_defer_count,
                          const char *pool, td_vbd_t * vbd)
 {
     struct td_xenblkif *td_blkif = NULL; /* TODO rename to blkif */
@@ -596,6 +603,8 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
     td_blkif->poll_duration = poll_duration;
     td_blkif->poll_idle_threshold = poll_idle_threshold;
     td_blkif->nr_queues = nr_queues;
+    td_blkif->kick_defer_max_usecs = kick_defer_duration;
+    td_blkif->kick_defer_max_held = kick_defer_count;
 
     if (indirect_max_segments > TD_MAX_INDIRECT_SEGMENTS) {
         RING_ERR(td_blkif, "too many indirect segments (%u), max %u\n",
@@ -652,6 +661,9 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
         queue->barrier.msg = NULL;
         queue->barrier.io_done = false;
         queue->barrier.io_err = 0;
+
+        queue->kick_defer_event = -1;
+        queue->kick_defer_armed = false;
 
         queue->chkrng_pending = false;
         pthread_mutex_init(&queue->mutex_chkrng, NULL);
@@ -724,7 +736,7 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
         }
 
         queue->chkrng_event = tapdisk_server_register_io_event(
-            tapdisk_xenblkif_queue_id(queue),
+            qid,
             SCHEDULER_POLL_TIMEOUT,         -1, TV_INF,
             tapdisk_xenblkif_cb_chkrng, queue);
         if (unlikely(queue->chkrng_event < 0)) {
@@ -735,13 +747,23 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
         }
 
         queue->stoppolling_event = tapdisk_server_register_io_event(
-            tapdisk_xenblkif_queue_id(queue),
+            qid,
             SCHEDULER_POLL_TIMEOUT,         -1, TV_INF,
             tapdisk_xenblkif_cb_stoppolling, queue);
         if (unlikely(queue->stoppolling_event < 0)) {
             err = queue->stoppolling_event;
             RING_ERR(td_blkif, "failed to register event: %s\n", strerror(-err));
             tapdisk_xenblkif_unmap_ring(queue, shared_ctx, sring);
+            goto fail;
+        }
+
+        queue->kick_defer_event = tapdisk_server_register_io_event(
+            qid,
+            SCHEDULER_POLL_TIMEOUT,	-1, TV_INF,
+            tapdisk_xenblkif_cb_kick_deadline, queue);
+        if (unlikely(queue->kick_defer_event < 0)) {
+            err = queue->kick_defer_event;
+            RING_ERR(td_blkif, "failed to register event: %s\n", strerror(-err));
             goto fail;
         }
 
