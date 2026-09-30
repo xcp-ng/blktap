@@ -70,6 +70,9 @@ td_xenblkif_bufcache_free(struct td_xenblkif * const blkif);
 static inline void
 td_xenblkif_bufcache_evt_unreg(struct td_xenblkif * const blkif);
 
+static int
+tapdisk_xenblkif_notify(struct td_xenblkif * const blkif);
+
 static void
 td_xenblkif_bufcache_event(event_id_t id, char mode, void *private)
 {
@@ -338,9 +341,11 @@ xenio_blkif_put_response(struct td_xenblkif * const blkif,
             blkif->kick_defer_last_ns = now;
         }
 
-        if (blkif->kick_defer_max_usecs && held && held < blkif->kick_defer_max_held
-                && tapdisk_xenblkif_reqs_pending(blkif) > 1
-                && (!(blkif->kick_defer_mode & TD_KICK_DEFER_POLL_ONLY) || blkif->in_polling)) {
+        if (blkif->kick_defer_max_usecs &&
+	    held && held < blkif->kick_defer_max_held &&
+	    tapdisk_xenblkif_reqs_pending(blkif) > 1 &&
+	    (!(blkif->kick_defer_mode & TD_KICK_DEFER_POLL_ONLY) || blkif->in_polling))
+	{
             blkif->stats.kick_defer.held++;
             if (!blkif->kick_defer_armed) {
                 unsigned int usecs = blkif->kick_defer_max_usecs;
@@ -352,8 +357,9 @@ xenio_blkif_put_response(struct td_xenblkif * const blkif,
                     else if (u < blkif->kick_defer_max_usecs)
                         usecs = (unsigned int)u;
                 }
-                if ((blkif->kick_defer_mode & TD_KICK_DEFER_LOAD_AWARE)
-                        && tapdisk_server_system_idle_cpu() < (float)blkif->poll_idle_threshold) {
+                if ((blkif->kick_defer_mode & TD_KICK_DEFER_LOAD_AWARE) &&
+		    tapdisk_server_system_idle_cpu() < (float)blkif->poll_idle_threshold)
+		{
                     /* dom0 is contended (polling would be refused): hold a quarter as long */
                     usecs = usecs / 4 < 5 ? 5 : usecs / 4;
                     blkif->stats.kick_defer.arms_short++;
@@ -362,11 +368,11 @@ xenio_blkif_put_response(struct td_xenblkif * const blkif,
                 blkif->stats.kick_defer.deadline_us_sum += usecs;
                 blkif->stats.kick_defer.arms++;
                 tapdisk_server_event_set_timeout(blkif->kick_defer_event,
-                        TV_USECS(usecs));
+						 TV_USECS(usecs));
             }
             return 0;
         }
-        return tapdisk_xenblkif_notify_now(blkif);
+        return tapdisk_xenblkif_notify(blkif);
     }
 
     return 0;
@@ -376,8 +382,8 @@ xenio_blkif_put_response(struct td_xenblkif * const blkif,
  * Pushes the produced responses to the front-end and notifies it if it asked
  * for it. Disarms a pending kick deadline. Must hold blkif->mutex.
  */
-int
-tapdisk_xenblkif_notify_now(struct td_xenblkif * const blkif)
+static int
+tapdisk_xenblkif_notify(struct td_xenblkif * const blkif)
 {
     blkif_common_back_ring_t * const ring = &blkif->rings.common;
     int notify;
@@ -425,7 +431,7 @@ tapdisk_xenblkif_cb_kick_deadline(event_id_t id __attribute__((unused)),
     blkif->kick_defer_armed = false;
     tapdisk_server_event_set_timeout(blkif->kick_defer_event, TV_INF);
     if (likely(!blkif->dead))
-        tapdisk_xenblkif_notify_now(blkif);
+        tapdisk_xenblkif_notify(blkif);
     pthread_mutex_unlock(&blkif->mutex);
 }
 
