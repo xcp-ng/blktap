@@ -36,6 +36,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <time.h>
 
 #ifdef __linux__
 #include <linux/version.h>
@@ -306,25 +307,126 @@ xenio_blkif_put_response(struct td_xenblkif * const blkif,
     }
 
     if (final) {
-        int notify;
-        RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
-        if (notify) {
-            int err = xenevtchn_notify(blkif->ctx->xce_handle, blkif->port);
-            if (err < 0) {
-                err = -errno;
-                if (req) {
-                    RING_ERR(blkif, "req %lu: failed to notify event channel: "
-                            "%s\n", req->msg.id, strerror(-err));
-                } else {
-                    RING_ERR(blkif, "failed to notify event channel: %s\n",
-                            strerror(-err));
+        /* Responses produced but not yet pushed to the front-end. */
+        const RING_IDX held = ring->rsp_prod_pvt - ring->sring->rsp_prod;
+
+        /*
+         * Deferred kick. While other requests of this ring are still in
+         * flight (the caller's own request is still counted as pending
+         * here), hold the push and the notification until
+         * kick_defer_max_held responses are ready or the
+         * kick_defer_max_usecs deadline fires, so the guest takes one
+         * interrupt per group instead of falling into lockstep. With nothing
+         * else in flight, notify now: QD1 and tail latency are untouched.
+         * (stats.kicks.out keeps counting group ends;
+         * stats.kick_defer.notifies counts the notifications actually sent.)
+         */
+        if (blkif->kick_defer_mode & TD_KICK_DEFER_ADAPTIVE) {
+            /*
+             * Smoothed interval between completion groups (EWMA, 1/8), used
+             * by the adaptive mode to size the hold: a few group intervals
+             * are enough to gather a batch, more only adds latency.
+             */
+            struct timespec ts;
+            long long now, dt;
+
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            now = (long long)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+            dt = now - blkif->kick_defer_last_ns;
+            if (blkif->kick_defer_last_ns && dt > 0 && dt < 100000000LL) /* ignore idle gaps > 100 ms */
+                blkif->kick_defer_ewma_ns += (dt - blkif->kick_defer_ewma_ns) / 8;
+            blkif->kick_defer_last_ns = now;
+        }
+
+        if (blkif->kick_defer_max_usecs && held && held < blkif->kick_defer_max_held
+                && tapdisk_xenblkif_reqs_pending(blkif) > 1
+                && (!(blkif->kick_defer_mode & TD_KICK_DEFER_POLL_ONLY) || blkif->in_polling)) {
+            blkif->stats.kick_defer.held++;
+            if (!blkif->kick_defer_armed) {
+                unsigned int usecs = blkif->kick_defer_max_usecs;
+                if (blkif->kick_defer_mode & TD_KICK_DEFER_ADAPTIVE) {
+                    long long u = 4 * (blkif->kick_defer_ewma_ns / 1000);
+
+                    if (u < 5)
+                        usecs = 5;
+                    else if (u < blkif->kick_defer_max_usecs)
+                        usecs = (unsigned int)u;
                 }
-                return err;
+                if ((blkif->kick_defer_mode & TD_KICK_DEFER_LOAD_AWARE)
+                        && tapdisk_server_system_idle_cpu() < (float)blkif->poll_idle_threshold) {
+                    /* dom0 is contended (polling would be refused): hold a quarter as long */
+                    usecs = usecs / 4 < 5 ? 5 : usecs / 4;
+                    blkif->stats.kick_defer.arms_short++;
+                }
+                blkif->kick_defer_armed = true;
+                blkif->stats.kick_defer.deadline_us_sum += usecs;
+                blkif->stats.kick_defer.arms++;
+                tapdisk_server_event_set_timeout(blkif->kick_defer_event,
+                        TV_USECS(usecs));
             }
+            return 0;
+        }
+        return tapdisk_xenblkif_notify_now(blkif);
+    }
+
+    return 0;
+}
+
+/**
+ * Pushes the produced responses to the front-end and notifies it if it asked
+ * for it. Disarms a pending kick deadline. Must hold blkif->mutex.
+ */
+int
+tapdisk_xenblkif_notify_now(struct td_xenblkif * const blkif)
+{
+    blkif_common_back_ring_t * const ring = &blkif->rings.common;
+    int notify;
+
+    ASSERT(blkif);
+
+    if (blkif->kick_defer_armed) {
+        blkif->kick_defer_armed = false;
+        tapdisk_server_event_set_timeout(blkif->kick_defer_event, TV_INF);
+    }
+
+    RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(ring, notify);
+    blkif->stats.kick_defer.pushes++;
+    if (notify) {
+        int err = xenevtchn_notify(blkif->ctx->xce_handle, blkif->port);
+        blkif->stats.kick_defer.notifies++;
+        if (err < 0) {
+            err = -errno;
+            RING_ERR(blkif, "failed to notify event channel: %s\n",
+                    strerror(-err));
+            return err;
         }
     }
 
     return 0;
+}
+
+/**
+ * Deferred kick deadline: push whatever responses are held.
+ */
+void
+tapdisk_xenblkif_cb_kick_deadline(event_id_t id __attribute__((unused)),
+        char mode __attribute__((unused)), void *private)
+{
+    struct td_xenblkif *blkif = private;
+
+    ASSERT(blkif);
+
+    pthread_mutex_lock(&blkif->mutex);
+    blkif->stats.kick_defer.deadlines++;
+    /*
+     * Scheduler timeouts are periodic: disarm explicitly here, whatever
+     * the state, or the callback would keep firing every kick_defer_max_usecs.
+     */
+    blkif->kick_defer_armed = false;
+    tapdisk_server_event_set_timeout(blkif->kick_defer_event, TV_INF);
+    if (likely(!blkif->dead))
+        tapdisk_xenblkif_notify_now(blkif);
+    pthread_mutex_unlock(&blkif->mutex);
 }
 
 

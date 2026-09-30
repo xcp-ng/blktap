@@ -62,4 +62,18 @@ tapdisk_xenblkif_stats(struct td_xenblkif * blkif, td_stats_t * st)
     tapdisk_stats_field(st, "vbd", "llu", blkif->stats.errors.vbd);
     tapdisk_stats_field(st, "img", "llu", blkif->stats.errors.img);
     tapdisk_stats_leave(st, '}');
+
+    tapdisk_stats_field(st, "kick_defer", "{");
+    tapdisk_stats_field(st, "max_usecs", "u", blkif->kick_defer_max_usecs);
+    tapdisk_stats_field(st, "max_held", "u", blkif->kick_defer_max_held);
+    tapdisk_stats_field(st, "pushes", "llu", blkif->stats.kick_defer.pushes);
+    tapdisk_stats_field(st, "notifies", "llu", blkif->stats.kick_defer.notifies);
+    tapdisk_stats_field(st, "held", "llu", blkif->stats.kick_defer.held);
+    tapdisk_stats_field(st, "deadlines", "llu", blkif->stats.kick_defer.deadlines);
+    tapdisk_stats_field(st, "mode", "u", blkif->kick_defer_mode);
+    tapdisk_stats_field(st, "arms", "llu", blkif->stats.kick_defer.arms);
+    tapdisk_stats_field(st, "deadline_us_sum", "llu", blkif->stats.kick_defer.deadline_us_sum);
+    tapdisk_stats_field(st, "ewma_ns", "lld", blkif->kick_defer_ewma_ns);
+    tapdisk_stats_field(st, "arms_short", "llu", blkif->stats.kick_defer.arms_short);
+    tapdisk_stats_leave(st, '}');
 }

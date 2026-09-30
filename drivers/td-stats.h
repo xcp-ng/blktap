@@ -49,6 +49,17 @@ struct td_xenblkif_stats {
         unsigned long long img;
     } errors;
 
+	/* deferred kick */
+	struct {
+		unsigned long long pushes;
+		unsigned long long notifies;
+		unsigned long long held;
+		unsigned long long deadlines;
+		unsigned long long arms;
+		unsigned long long arms_short;
+		unsigned long long deadline_us_sum;
+	} kick_defer;
+
 	struct blkback_stats *xenvbd;
 };
 

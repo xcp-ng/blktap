@@ -52,6 +52,11 @@ struct td_xenio_ctx;
 struct td_vbd_handle;
 struct td_xenblkif_stats;
 
+/* Deferred kick modes (bit mask). */
+#define TD_KICK_DEFER_POLL_ONLY  1 /* defer only while the ring is being polled */
+#define TD_KICK_DEFER_ADAPTIVE   2 /* deadline = 4 x smoothed inter-group interval, clamped */
+#define TD_KICK_DEFER_LOAD_AWARE 4 /* deadline / 4 while dom0 idle < polling idle threshold */
+
 struct td_xenblkif {
 
     /**
@@ -221,6 +226,21 @@ struct td_xenblkif {
 
 	bool in_polling;
 	int poll_duration; /* microseconds; 0 means no polling. */
+
+	/*
+	 * Deferred kick: hold the response push while other requests are in
+	 * flight, until kick_defer_max_held responses are ready or
+	 * kick_defer_max_usecs elapsed since the first held one. 0 = off.
+	 * Prototype knob: read from /etc/tapdisk-kick-defer.conf
+	 * ("usecs count mode") at connect.
+	 */
+	unsigned int kick_defer_max_usecs;
+	unsigned int kick_defer_max_held;
+	unsigned int kick_defer_mode; /* TD_KICK_DEFER_* */
+	long long kick_defer_last_ns;
+	long long kick_defer_ewma_ns;
+	event_id_t kick_defer_event;
+	bool kick_defer_armed;
 	int poll_idle_threshold;
 };
 
@@ -312,6 +332,17 @@ tapdisk_xenblkif_chkrng_event_id(const struct td_xenblkif * const blkif);
  */
 extern event_id_t
 tapdisk_xenblkif_stoppolling_event_id(const struct td_xenblkif * const blkif);
+
+/**
+ * Pushes the produced responses to the front-end and notifies it if it
+ * asked for it; disarms a pending kick deadline. blkif->mutex held.
+ */
+int
+tapdisk_xenblkif_notify_now(struct td_xenblkif * const blkif);
+
+/** Deferred kick deadline callback (td-req.c); registered in td-blkif.c. */
+void
+tapdisk_xenblkif_cb_kick_deadline(event_id_t id, char mode, void *private);
 
 /**
  * Updates ring stats.

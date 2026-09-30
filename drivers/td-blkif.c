@@ -33,6 +33,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/prctl.h>
 #include <libgen.h>
 #include <zlib.h>
 
@@ -229,6 +230,11 @@ tapdisk_xenblkif_destroy(struct td_xenblkif * blkif)
         tapdisk_server_unregister_event(
 				tapdisk_xenblkif_stoppolling_event_id(blkif));
         blkif->stoppolling_event = -1;
+    }
+
+    if (blkif->kick_defer_event >= 0) {
+        tapdisk_server_unregister_event(blkif->kick_defer_event);
+        blkif->kick_defer_event = -1;
     }
 
     tapdisk_xenblkif_reqs_free(blkif);
@@ -466,6 +472,43 @@ tapdisk_xenblkif_cb_chkrng(event_id_t id __attribute__((unused)),
 }
 
 
+/*
+ * Prototype knob: /etc/tapdisk-kick-defer.conf holds "<usecs> <count> [<mode>]".
+ * Absent or unreadable = kick deferral off. A product version would take this
+ * from the VBD other-config like polling-duration.
+ */
+static void
+tapdisk_xenblkif_kick_defer_config(struct td_xenblkif *blkif)
+{
+    FILE *f = fopen("/etc/tapdisk-kick-defer.conf", "r");
+    unsigned int usecs = 0, count = 0, mode = 0;
+
+    if (f) {
+        int n = fscanf(f, "%u %u %u", &usecs, &count, &mode);
+        if (n < 2)
+            usecs = count = 0;
+        if (n < 3)
+            mode = 0;
+        fclose(f);
+    }
+    blkif->kick_defer_max_usecs = usecs;
+    blkif->kick_defer_max_held = count ? count : 8;
+    blkif->kick_defer_mode = mode;
+    blkif->kick_defer_last_ns = 0;
+    blkif->kick_defer_ewma_ns = (long long)usecs * 1000 / 4;
+    if (usecs) {
+        static bool slack_set;
+
+        /* select() timeouts honour the timer slack; make it small (once). */
+        if (!slack_set) {
+            prctl(PR_SET_TIMERSLACK, 5000);
+            slack_set = true;
+        }
+        RING_DEBUG(blkif, "deferred kick: %u us, %u responses, mode %u\n",
+                usecs, blkif->kick_defer_max_held, mode);
+    }
+}
+
 int
 tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
         int order, evtchn_port_t port, int proto, int poll_duration,
@@ -511,6 +554,9 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
 	td_blkif->chkrng_event = -1;
 	td_blkif->stoppolling_event = -1;
 	td_blkif->in_polling = false;
+	td_blkif->kick_defer_event = -1;
+	td_blkif->kick_defer_armed = false;
+	tapdisk_xenblkif_kick_defer_config(td_blkif);
 	td_blkif->poll_duration = poll_duration;
 	td_blkif->poll_idle_threshold = poll_idle_threshold;
 	td_blkif->barrier.msg = NULL;
@@ -632,6 +678,15 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
 			tapdisk_xenblkif_cb_stoppolling, td_blkif);
     if (unlikely(td_blkif->stoppolling_event < 0)) {
         err = td_blkif->stoppolling_event;
+        RING_ERR(td_blkif, "failed to register event: %s\n", strerror(-err));
+        goto fail;
+    }
+
+    td_blkif->kick_defer_event = tapdisk_server_register_event(
+			SCHEDULER_POLL_TIMEOUT,	-1, TV_INF,
+			tapdisk_xenblkif_cb_kick_deadline, td_blkif);
+    if (unlikely(td_blkif->kick_defer_event < 0)) {
+        err = td_blkif->kick_defer_event;
         RING_ERR(td_blkif, "failed to register event: %s\n", strerror(-err));
         goto fail;
     }
