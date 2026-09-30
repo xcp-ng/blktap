@@ -53,7 +53,7 @@ struct td_xenblkif_stats {
 	struct {
 		unsigned long long pushes;
 		unsigned long long notifies;
-		unsigned long long held;
+		unsigned long long holds;
 		unsigned long long deadlines;
 		unsigned long long arms;
 		unsigned long long arms_short;

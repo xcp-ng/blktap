@@ -68,7 +68,7 @@ tapdisk_xenblkif_stats(struct td_xenblkif * blkif, td_stats_t * st)
     tapdisk_stats_field(st, "max_held", "u", blkif->kick_defer_max_held);
     tapdisk_stats_field(st, "pushes", "llu", blkif->stats.kick_defer.pushes);
     tapdisk_stats_field(st, "notifies", "llu", blkif->stats.kick_defer.notifies);
-    tapdisk_stats_field(st, "held", "llu", blkif->stats.kick_defer.held);
+    tapdisk_stats_field(st, "holds", "llu", blkif->stats.kick_defer.holds);
     tapdisk_stats_field(st, "deadlines", "llu", blkif->stats.kick_defer.deadlines);
     tapdisk_stats_field(st, "mode", "u", blkif->kick_defer_mode);
     tapdisk_stats_field(st, "arms", "llu", blkif->stats.kick_defer.arms);
