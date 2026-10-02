@@ -98,6 +98,12 @@ xenevtchn_notify(xenevtchn_handle *xce, evtchn_port_t port)
 	return 0;
 }
 
+enum memory_mode_t
+tapdisk_server_mem_mode(void)
+{
+	return NORMAL_MEMORY_MODE;
+}
+
 /* --- helpers --- */
 
 static void
