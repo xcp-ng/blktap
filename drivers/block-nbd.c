@@ -206,11 +206,8 @@ tdnbd_fdreceiver_stop()
 static void
 __cancel_req(int i, struct td_nbd_request *pos, int e)
 {
-	char handle[9];
-	memcpy(handle, pos->nreq.handle, 8);
-	handle[8] = 0;
 	INFO("Entry %d: handle='%s' type=%d, len=%d: %s",
-	     i, handle, ntohs(pos->nreq.type), ntohl(pos->nreq.len), strerror(e));
+	     i, pos->nreq.handle, ntohs(pos->nreq.type), ntohl(pos->nreq.len), strerror(e));
 
 	if (pos->timeout_event >= 0) {
 		tapdisk_server_unregister_event(pos->timeout_event);
@@ -416,7 +413,6 @@ tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
 static void
 tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 {
-	char handle[9];
 	int do_disable = 0;
 
 	/* Check to see if we're in the middle of reading a response already */
@@ -451,11 +447,8 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 		}
 
 		if (prv->curr_reply_req == NULL) {
-			memcpy(handle, prv->current_reply.handle, 8);
-			handle[8] = 0;
-
 			ERROR("Couldn't find request corresponding to reply "
-					"(reply handle='%s')", handle);
+					"(reply handle='%s')", prv->current_reply.handle);
 			tdnbd_disable(prv, EIO);
 			return;
 		}
