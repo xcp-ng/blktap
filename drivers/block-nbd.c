@@ -29,6 +29,7 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include "tapdisk.h"
 #include "tapdisk-server.h"
 #include "tapdisk-driver.h"
@@ -69,7 +70,6 @@ struct tdnbd_passed_fd {
 
 enum tdnbd_state {
 	TDNBD_OPEN,		/* connected, normal operation */
-	TDNBD_DISC_SENT,	/* NBD_CMD_DISC written, about to be disabled */
 	TDNBD_DEAD,		/* events unregistered, requests cancelled */
 };
 
@@ -326,26 +326,12 @@ tdnbd_writer_cb(event_id_t eb, char mode, void *data)
 				return;
 		}
 
-		if (ntohs(pos->nreq.type) == TAPDISK_NBD_CMD_DISC) {
-			INFO("sent close request");
-			/*
-			 * We don't expect a response from a DISC, so move the
-			 * request back onto the free list
-			 */
-			list_move(&pos->queue, &prv->free_reqs);
-			prv->nr_free_count++;
-			prv->state = TDNBD_DISC_SENT;
-		} else {
-			list_move(&pos->queue, &prv->sent_reqs);
-		}
+		list_move(&pos->queue, &prv->sent_reqs);
 	}
 
 	/* If we're here, we've written everything */
 
 	disable_write_queue(prv);
-
-	if (prv->state == TDNBD_DISC_SENT)
-		tdnbd_disable(prv, EIO);
 
 	return;
 }
@@ -941,34 +927,99 @@ tdnbd_open(td_driver_t* driver, const char* name,
 
 }
 
+#define TDNBD_CLOSE_TIMEOUT_MS (10 * 1000)
+
+/*
+ * Wait for the socket to be ready for the given poll events.
+ * Returns > 0 if ready, 0 on timeout, -errno on error.
+ */
+static int
+tdnbd_wait_fd(int fd, short events)
+{
+	struct pollfd pfd = { .fd = fd, .events = events };
+	int rc;
+
+	rc = TEMP_FAILURE_RETRY(poll(&pfd, 1, TDNBD_CLOSE_TIMEOUT_MS));
+
+	return rc < 0 ? -errno : rc;
+}
+
+/*
+ * Cleanly disconnect from the server: flush the pending requests, wait for
+ * the replies to the ones in flight, then send NBD_CMD_DISC. The connection
+ * is disabled afterwards, whatever the outcome.
+ */
+static int
+tdnbd_disconnect(struct tdnbd_data *prv)
+{
+	struct nbd_request disc;
+	struct nbd_queued_io io;
+	int rc;
+
+	INFO("Flushing pending requests");
+	while (prv->state != TDNBD_DEAD && !list_empty(&prv->pending_reqs)) {
+		rc = tdnbd_wait_fd(prv->socket, POLLOUT);
+		if (rc <= 0)
+			goto fail;
+		tdnbd_writer_cb(0, 0, prv);
+	}
+
+	INFO("Waiting for the replies to the sent requests");
+	while (prv->state != TDNBD_DEAD && !list_empty(&prv->sent_reqs)) {
+		rc = tdnbd_wait_fd(prv->socket, POLLIN);
+		if (rc <= 0)
+			goto fail;
+		tdnbd_reader_cb(0, 0, prv);
+	}
+
+	if (prv->state == TDNBD_DEAD)
+		return -EIO;
+
+	/* NBD_CMD_DISC has no reply, so it doesn't need a request slot */
+	memset(&disc, 0, sizeof(disc));
+	disc.magic = htonl(NBD_REQUEST_MAGIC);
+	disc.type = htons(TAPDISK_NBD_CMD_DISC);
+	io.buffer = (char *)&disc;
+	io.len = sizeof(disc);
+	io.so_far = 0;
+
+	INFO("Writing disconnection request");
+	do {
+		rc = tdnbd_wait_fd(prv->socket, POLLOUT);
+		if (rc <= 0)
+			goto fail;
+		rc = tdnbd_write_some(prv->socket, &io);
+	} while (rc > 0);
+
+	if (rc < 0)
+		goto fail;
+
+	tdnbd_disable(prv, EIO);
+
+	return 0;
+
+fail:
+	ERROR("NBD close: failed to disconnect cleanly: %d", rc);
+	tdnbd_disable(prv, EIO);
+
+	return rc ? rc : -ETIMEDOUT;
+}
+
 static int
 tdnbd_close(td_driver_t* driver)
 {
 	struct tdnbd_data *prv = (struct tdnbd_data *)driver->data;
-	td_request_t treq;
 
-	bzero(&treq, sizeof(treq));
-
-	if (prv->state == TDNBD_DEAD) {
-		INFO("NBD close: already decided that the connection is dead.");
+	if (prv->state == TDNBD_DEAD || tdnbd_disconnect(prv) < 0) {
+		INFO("NBD close: the connection is dead.");
 		if (prv->socket >= 0)
 			close(prv->socket);
 		prv->socket = -1;
 		return 0;
 	}
 
-	/* Send a close packet */
-
-	INFO("Sending disconnect request");
-	tdnbd_queue_request(prv, TAPDISK_NBD_CMD_DISC, 0, 0, 0, treq, 0);
-
 	INFO("Switching socket to blocking IO mode");
 	fcntl(prv->socket, F_SETFL, fcntl(prv->socket, F_GETFL) & ~O_NONBLOCK);
-
-	INFO("Writing disconnection request");
-	tdnbd_writer_cb(0, 0, prv);
-
-	INFO("Written");
 
 	if (prv->peer_ip) {
 		free(prv->peer_ip);
