@@ -1311,7 +1311,8 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 	}
 
 	request.from = ntohll(request.from);
-	request.type = ntohl(request.type);
+	request.flags = ntohs(request.flags);
+	request.type = ntohs(request.type);
 	len = ntohl(request.len);
 	if (((len & 0x1ff) != 0) || ((request.from & 0x1ff) != 0)) {
 		ERR("Non sector-aligned request (%"PRIu64", %d)",

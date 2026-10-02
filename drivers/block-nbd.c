@@ -204,7 +204,7 @@ __cancel_req(int i, struct td_nbd_request *pos, int e)
 	memcpy(handle, pos->nreq.handle, 8);
 	handle[8] = 0;
 	INFO("Entry %d: handle='%s' type=%d, len=%d: %s",
-	     i, handle, ntohl(pos->nreq.type), ntohl(pos->nreq.len), strerror(e));
+	     i, handle, ntohs(pos->nreq.type), ntohl(pos->nreq.len), strerror(e));
 
 	if (pos->timeout_event >= 0) {
 		tapdisk_server_unregister_event(pos->timeout_event);
@@ -315,12 +315,12 @@ tdnbd_writer_cb(event_id_t eb, char mode, void *data)
 		if (tdnbd_write_some(prv->socket, &pos->header) > 0)
 			return;
 
-		if (ntohl(pos->nreq.type) == TAPDISK_NBD_CMD_WRITE) {
+		if (ntohs(pos->nreq.type) == TAPDISK_NBD_CMD_WRITE) {
 			if (tdnbd_write_some(prv->socket, &pos->body) > 0)
 				return;
 		}
 
-		if (ntohl(pos->nreq.type) == TAPDISK_NBD_CMD_DISC) {
+		if (ntohs(pos->nreq.type) == TAPDISK_NBD_CMD_DISC) {
 			INFO("sent close request");
 			/*
 			 * We don't expect a response from a DISC, so move the
@@ -396,7 +396,8 @@ tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
 	req->timeout_event = -1;
 
 	req->nreq.magic = htonl(NBD_REQUEST_MAGIC);
-	req->nreq.type = htonl(type);
+	req->nreq.flags = 0;
+	req->nreq.type = htons(type);
 	req->nreq.from = htonll(offset);
 	req->nreq.len = htonl(length);
 	req->header.buffer = (char *)&req->nreq;
@@ -466,7 +467,7 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 		}
 	}
 
-	switch(ntohl(prv->curr_reply_req->nreq.type)) {
+	switch(ntohs(prv->curr_reply_req->nreq.type)) {
 	case TAPDISK_NBD_CMD_READ:
 		rc = tdnbd_read_some(prv->socket,
 				&prv->curr_reply_req->body);
@@ -489,7 +490,7 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 		break;
 	default:
 		ERROR("Unhandled request response: %d",
-				ntohl(prv->curr_reply_req->nreq.type));
+				ntohs(prv->curr_reply_req->nreq.type));
 		do_disable = 1;
 		return;
 	} 

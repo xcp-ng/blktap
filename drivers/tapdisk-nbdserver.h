@@ -50,7 +50,8 @@ typedef enum nbd_protocol_style {
 
 struct nbd_request {
 	uint32_t magic;
-	uint32_t type;	
+	uint16_t flags;
+	uint16_t type;
 	char handle[8];
 	uint64_t from;
 	uint32_t len;
