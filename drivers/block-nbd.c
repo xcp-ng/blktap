@@ -67,6 +67,12 @@ struct tdnbd_passed_fd {
 	int                     fd;
 } passed_fds[N_PASSED_FDS];
 
+enum tdnbd_state {
+	TDNBD_OPEN,		/* connected, normal operation */
+	TDNBD_DISC_SENT,	/* NBD_CMD_DISC written, about to be disabled */
+	TDNBD_DEAD,		/* events unregistered, requests cancelled */
+};
+
 struct nbd_queued_io {
 	char                   *buffer;
 	int                     len;
@@ -110,7 +116,7 @@ struct tdnbd_data
 	char                   *name;
 
 	int                     flags;
-	int                     closed;
+	enum tdnbd_state        state;
 
 	unsigned int            handle_id;
 };
@@ -233,8 +239,8 @@ tdnbd_disable(struct tdnbd_data *prv, int e)
 	list_for_each_entry_safe(pos, q, &prv->pending_reqs, queue)
 		__cancel_req(i++, pos, e);
 
-	INFO("Setting closed");
-	prv->closed = 3;
+	INFO("Setting state to dead");
+	prv->state = TDNBD_DEAD;
 }
 
 /* NBD writer queue */
@@ -328,7 +334,7 @@ tdnbd_writer_cb(event_id_t eb, char mode, void *data)
 			 */
 			list_move(&pos->queue, &prv->free_reqs);
 			prv->nr_free_count++;
-			prv->closed = 2;
+			prv->state = TDNBD_DISC_SENT;
 		} else {
 			list_move(&pos->queue, &prv->sent_reqs);
 		}
@@ -338,7 +344,7 @@ tdnbd_writer_cb(event_id_t eb, char mode, void *data)
 
 	disable_write_queue(prv);
 
-	if (prv->closed == 2)
+	if (prv->state == TDNBD_DISC_SENT)
 		tdnbd_disable(prv, EIO);
 
 	return;
@@ -378,7 +384,7 @@ tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
 	if (prv->nr_free_count == 0) 
 		return -EBUSY;
 
-	if (prv->closed == 3) {
+	if (prv->state == TDNBD_DEAD) {
 		td_complete_request(treq, -ETIMEDOUT);
 		return -ETIMEDOUT;
 	}
@@ -925,7 +931,7 @@ tdnbd_open(td_driver_t* driver, const char* name,
 				(void *)prv);
 
 	prv->flags = flags;
-	prv->closed = 0;
+	prv->state = TDNBD_OPEN;
 
 	if (flags & TD_OPEN_SECONDARY)
 		INFO("Opening in secondary mode: Read requests will be "
@@ -943,7 +949,7 @@ tdnbd_close(td_driver_t* driver)
 
 	bzero(&treq, sizeof(treq));
 
-	if (prv->closed == 3) {
+	if (prv->state == TDNBD_DEAD) {
 		INFO("NBD close: already decided that the connection is dead.");
 		if (prv->socket >= 0)
 			close(prv->socket);
