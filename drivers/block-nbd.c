@@ -111,9 +111,9 @@ struct tdnbd_data
 
 	int                     flags;
 	int                     closed;
-};
 
-int global_id = 0;
+	unsigned int            handle_id;
+};
 
 static void disable_write_queue(struct tdnbd_data *prv);
 
@@ -389,8 +389,10 @@ tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
 	/* fill in the request */
 
 	req->treq = treq;
-	int id = global_id++;
-	snprintf(req->nreq.handle, 8, "td%05x", id % 0xffff);
+
+	unsigned int id = prv->handle_id;
+	prv->handle_id = (prv->handle_id + 1) % 0x100000;
+	snprintf(req->nreq.handle, 8, "td%05x", id);
 
 	/* Don't time the NBD requests out */
 	req->timeout_event = -1;
@@ -847,6 +849,7 @@ tdnbd_open(td_driver_t* driver, const char* name,
 
 	INFO("Opening nbd export to %s (flags=%x)\n", name, flags);
 
+	prv->handle_id = 0;
 	prv->writer_event_id = -1;
 	INIT_LIST_HEAD(&prv->sent_reqs);
 	INIT_LIST_HEAD(&prv->pending_reqs);
