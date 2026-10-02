@@ -60,6 +60,8 @@
 #define NBD_FLAG_SEND_CACHE        (1 << 10)
 #define NBD_FLAG_SEND_FAST_ZERO    (1 << 11)
 
+#define NBD_CMD_FLAG_REQ_ONE       (1 << 3)
+
 #define NBD_OPT_EXPORT_NAME        1
 #define NBD_OPT_ABORT              2
 #define NBD_OPT_LIST               3

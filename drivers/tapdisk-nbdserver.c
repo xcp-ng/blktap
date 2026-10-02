@@ -80,6 +80,7 @@ uint16_t gflags = (NBD_FLAG_FIXED_NEWSTYLE | NBD_FLAG_NO_ZEROES);
 struct td_nbdserver_req {
 	td_vbd_request_t        vreq;
 	char                    id[16];
+	uint16_t                flags;
 	struct td_iovec         iov;
 	/* data buffer kept between two uses of this request */
 	void                   *buf;
@@ -929,6 +930,11 @@ __tapdisk_nbdserver_block_status_cb(td_vbd_request_t *vreq, int err,
 	td_nbdserver_client_t *client = token;
 	td_nbdserver_req_t *req = container_of(vreq, td_nbdserver_req_t, vreq);
 	tapdisk_extents_t* extents = (tapdisk_extents_t *)(vreq->data);
+
+	/* With REQ_ONE, the reply must not hold more than one extent */
+	if ((req->flags & NBD_CMD_FLAG_REQ_ONE) && extents->count > 1)
+		extents->count = 1;
+
 	send_structured_reply_block_status (client->client_fd, req->id, extents);
 	free_extents(extents);
 	tapdisk_nbd_server_free_vreq(client, vreq, true);
@@ -1264,6 +1270,7 @@ static td_vbd_request_t *create_request_vreq(
 
 	nbdreq_init(req);
 	memcpy(req->id, request.handle, sizeof(request.handle));
+	req->flags = request.flags;
 
 	req->iov.base = nbdreq_buffer_get(req, len);
 	if (!req->iov.base) {
