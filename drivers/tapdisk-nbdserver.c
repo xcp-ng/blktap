@@ -215,6 +215,50 @@ convert_extents_to_block_descriptors (struct tapdisk_extents *extents)
     return blocks;
 }
 
+/*
+ * Map a tapdisk error (negative errno) to one of the error values the
+ * NBD protocol allows in a reply. They match the Linux errno values.
+ */
+static uint32_t
+tapdisk_nbdserver_errno(int error)
+{
+	switch (-error) {
+	case 0:
+	case EPERM:
+	case EIO:
+	case ENOMEM:
+	case EINVAL:
+	case ENOSPC:
+	case EOVERFLOW:
+	case ENOTSUP:
+	case ESHUTDOWN:
+		return -error;
+	default:
+		return EIO;
+	}
+}
+
+/* Send a final NBD_REPLY_TYPE_ERROR chunk, without a message */
+static int
+send_structured_reply_error(int fd, char *id, int error)
+{
+	struct {
+		struct nbd_structured_reply reply;
+		uint32_t error;
+		uint16_t msg_len;
+	} __attribute__((__packed__)) chunk;
+
+	chunk.reply.magic = htobe32(NBD_STRUCTURED_REPLY_MAGIC);
+	chunk.reply.flags = htobe16(NBD_REPLY_FLAG_DONE);
+	chunk.reply.type = htobe16(NBD_REPLY_TYPE_ERROR);
+	memcpy(&chunk.reply.handle, id, sizeof(chunk.reply.handle));
+	chunk.reply.length = htobe32(sizeof(chunk.error) + sizeof(chunk.msg_len));
+	chunk.error = htobe32(tapdisk_nbdserver_errno(error));
+	chunk.msg_len = 0;
+
+	return send_fully_or_fail(fd, &chunk, sizeof(chunk));
+}
+
 static int
 send_structured_reply_block_status (int fd, char* id, struct tapdisk_extents *extents)
 {
@@ -931,11 +975,19 @@ __tapdisk_nbdserver_block_status_cb(td_vbd_request_t *vreq, int err,
 	td_nbdserver_req_t *req = container_of(vreq, td_nbdserver_req_t, vreq);
 	tapdisk_extents_t* extents = (tapdisk_extents_t *)(vreq->data);
 
+	if (err) {
+		if (send_structured_reply_error(client->client_fd, req->id, err) < 0)
+			ERR("Failed to send block status error reply");
+		goto finish;
+	}
+
 	/* With REQ_ONE, the reply must not hold more than one extent */
 	if ((req->flags & NBD_CMD_FLAG_REQ_ONE) && extents->count > 1)
 		extents->count = 1;
 
 	send_structured_reply_block_status (client->client_fd, req->id, extents);
+
+finish:
 	free_extents(extents);
 	tapdisk_nbd_server_free_vreq(client, vreq, true);
 }
@@ -987,6 +1039,13 @@ __tapdisk_nbdserver_structured_read_cb(
 		goto finish;
 	}
 
+	if (error) {
+		server->nbd_stats.stats->io_errors++;
+		if (send_structured_reply_error(client->client_fd, req->id, error) < 0)
+			ERR("Failed to send structured read error reply");
+		goto finish;
+	}
+
 	len = vreq->iov->secs << SECTOR_SHIFT;
 
 	/* For now, say we're done, if we have to support multiple chunks it will be harder */
@@ -1016,35 +1075,9 @@ __tapdisk_nbdserver_structured_read_cb(
 		goto finish;
 	}
 
-	if (error)
-		server->nbd_stats.stats->io_errors++;
-
 finish:
 	nbdreq_buffer_put(req);
 	tapdisk_nbdserver_free_request(client, req, true);
-}
-
-/*
- * Map a tapdisk error (negative errno) to one of the error values the
- * NBD protocol allows in a reply. They match the Linux errno values.
- */
-static uint32_t
-tapdisk_nbdserver_errno(int error)
-{
-	switch (-error) {
-	case 0:
-	case EPERM:
-	case EIO:
-	case ENOMEM:
-	case EINVAL:
-	case ENOSPC:
-	case EOVERFLOW:
-	case ENOTSUP:
-	case ESHUTDOWN:
-		return -error;
-	default:
-		return EIO;
-	}
 }
 
 static void
