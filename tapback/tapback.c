@@ -604,11 +604,12 @@ int main(int argc, char **argv)
             {"help", 0, NULL, 'h'},
             {"debug", 0, NULL, 'd'},
             {"verbose", 0, NULL, 'v'},
-            {"name", 0, NULL, 'n'},
-            {"pidfile", 0, NULL, 'p'},
-            {"domain", 0, NULL, 'x'},
+            {"name", 1, NULL, 'n'},
+            {"pidfile", 1, NULL, 'p'},
+            {"domain", 1, NULL, 'x'},
             {"nobarrier", 0, NULL, 'b'},
             {"noqueues", 0, NULL, 'q'},
+            {NULL, 0, NULL, 0},
         };
         int c;
 
