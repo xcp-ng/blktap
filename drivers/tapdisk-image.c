@@ -229,12 +229,10 @@ tapdisk_image_open_parent(td_image_t *image, struct td_vbd_encryption *encryptio
 	id.flags = image->flags;
 
 	err = td_get_parent_id(image, &id);
-	if (err == TD_NO_PARENT) {
-		td_err_set_success(error);
-		goto out;
-	}
+	if (err == TD_NO_PARENT)
+		goto success;
 	if (err)
-		return td_err_set_errno(error, err);
+		goto fail;
 
 	if (((id.flags & TD_OPEN_NO_O_DIRECT) == TD_OPEN_NO_O_DIRECT) &&
             ((id.flags & TD_OPEN_LOCAL_CACHE) == TD_OPEN_LOCAL_CACHE))
@@ -243,15 +241,18 @@ tapdisk_image_open_parent(td_image_t *image, struct td_vbd_encryption *encryptio
 	if (err) {
 		td_err_set_reason(error, id.name);
 		free(id.name);
-		return td_err_set_errno(error, err);
+		goto fail;
 	}
-	td_err_set_success(error);
 	/* Name has been duped to driver_name */
 	free(id.name);
 
-out:
+success:
+	td_err_set_success(error);
 	*_parent = parent;
 	return td_err_get_errno(error);
+fail:
+	*_parent = NULL;
+	return td_err_set_errno(error, err);
 }
 
 static int
