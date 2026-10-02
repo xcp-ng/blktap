@@ -1024,6 +1024,29 @@ finish:
 	tapdisk_nbdserver_free_request(client, req, true);
 }
 
+/*
+ * Map a tapdisk error (negative errno) to one of the error values the
+ * NBD protocol allows in a reply. They match the Linux errno values.
+ */
+static uint32_t
+tapdisk_nbdserver_errno(int error)
+{
+	switch (-error) {
+	case 0:
+	case EPERM:
+	case EIO:
+	case ENOMEM:
+	case EINVAL:
+	case ENOSPC:
+	case EOVERFLOW:
+	case ENOTSUP:
+	case ESHUTDOWN:
+		return -error;
+	default:
+		return EIO;
+	}
+}
+
 static void
 __tapdisk_nbdserver_request_cb(td_vbd_request_t *vreq, int error,
 		void *token, int final)
@@ -1037,7 +1060,7 @@ __tapdisk_nbdserver_request_cb(td_vbd_request_t *vreq, int error,
 	int rc = 0;
 
 	reply.magic = htonl(NBD_REPLY_MAGIC);
-	reply.error = htonl(error);
+	reply.error = htonl(tapdisk_nbdserver_errno(error));
 	memcpy(reply.handle, req->id, sizeof(reply.handle));
 
 	gettimeofday(&now, NULL);
