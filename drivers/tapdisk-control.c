@@ -875,6 +875,29 @@ fail_close:
 	goto out;
 }
 
+/*
+ * NBD requests of the VBD that can still complete. A quiesced VBD does not
+ * issue its queued requests: only the issued ones can complete then.
+ */
+static bool
+tapdisk_control_nbd_requests_in_flight(td_vbd_t *vbd)
+{
+	int pending = 0;
+
+	if (vbd->nbdserver)
+		pending += tapdisk_nbdserver_server_reqs_pending(vbd->nbdserver);
+	if (vbd->nbdserver_new)
+		pending += tapdisk_nbdserver_server_reqs_pending(vbd->nbdserver_new);
+	if (!pending)
+		return false;
+
+	if (td_flag_test(vbd->state, TD_VBD_QUIESCED) ||
+	    td_flag_test(vbd->state, TD_VBD_QUIESCE_REQUESTED))
+		return !list_empty(&vbd->pending_requests);
+
+	return true;
+}
+
 static int
 tapdisk_control_close_image(struct tapdisk_ctl_conn *conn,
 			    tapdisk_message_t *request, tapdisk_message_t * const response, td_err *error)
@@ -932,6 +955,14 @@ tapdisk_control_close_image(struct tapdisk_ctl_conn *conn,
          * be accessed by these requests, and this will lead to a crash.
          */
         while (unlikely(tapdisk_vbd_contains_dead_rings(vbd)))
+            tapdisk_server_iterate();
+
+        /*
+         * Same for the NBD requests in flight: they complete through their
+         * client and their NBD server (statistics), both freed below. The NBD
+         * servers are paused: no new request is received meanwhile.
+         */
+        while (unlikely(tapdisk_control_nbd_requests_in_flight(vbd)))
             tapdisk_server_iterate();
     }
     else {

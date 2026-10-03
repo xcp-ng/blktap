@@ -199,6 +199,7 @@ void tapdisk_nbdserver_free_request(td_nbdserver_client_t *client,
  * Tells how many requests are pending.
  */
 int tapdisk_nbdserver_reqs_pending(td_nbdserver_client_t *client);
+int tapdisk_nbdserver_server_reqs_pending(td_nbdserver_t *server);
 
 int tapdisk_nbdserver_new_protocol_handshake(td_nbdserver_client_t *client, int);
 void tapdisk_nbdserver_handshake_cb(event_id_t, char, void*);
