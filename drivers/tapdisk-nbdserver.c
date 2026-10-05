@@ -53,6 +53,8 @@
 
 #define MEGABYTES 1024 * 1024
 
+#define MAX_LISTEN_BACKLOG 10
+
 #define NBD_SERVER_NUM_REQS 8
 #define MAX_REQUEST_SIZE (64 * MEGABYTES)
 
@@ -157,7 +159,7 @@ int recv_fully_or_fail(int f, void *buf, size_t len) {
 	return -err;
 }
 
-int send_fully_or_fail(int f, void *buf, size_t len) {
+int send_fully_or_fail(int f, const void *buf, size_t len) {
 	ssize_t res;
 	int err = 0;
 	while (len > 0) {
@@ -1542,6 +1544,7 @@ tapdisk_nbdserver_alloc(td_vbd_t *vbd, td_disk_info_t info, nbd_protocol_style_t
 {
 	td_nbdserver_t *server;
 	char fdreceiver_path[TAPDISK_NBDSERVER_MAX_PATH_LEN];
+	const char* path;
 
 	server = calloc(1, sizeof(*server));
 	if (!server) {
@@ -1577,9 +1580,11 @@ tapdisk_nbdserver_alloc(td_vbd_t *vbd, td_disk_info_t info, nbd_protocol_style_t
 			break;
 	}
 
+	path = (style == TAPDISK_NBD_PROTOCOL_OLD) ?
+		TAPDISK_NBDSERVER_OLD_LISTEN_SOCK_PATH : TAPDISK_NBDSERVER_NEW_LISTEN_SOCK_PATH;
 	if (snprintf(fdreceiver_path, TAPDISK_NBDSERVER_MAX_PATH_LEN,
 			"%s%d.%d",
-			(style == TAPDISK_NBD_PROTOCOL_OLD)?TAPDISK_NBDSERVER_OLD_LISTEN_SOCK_PATH:TAPDISK_NBDSERVER_NEW_LISTEN_SOCK_PATH,
+			path,
 			getpid(),
 			vbd->uuid) < 0) {
 		ERR("Failed to snprintf fdreceiver_path");
@@ -1593,9 +1598,11 @@ tapdisk_nbdserver_alloc(td_vbd_t *vbd, td_disk_info_t info, nbd_protocol_style_t
 		goto fail;
 	}
 
+	path = (style == TAPDISK_NBD_PROTOCOL_OLD) ?
+		TAPDISK_NBDSERVER_OLD_SOCK_PATH : TAPDISK_NBDSERVER_NEW_SOCK_PATH;
 	if (snprintf(server->sockpath, TAPDISK_NBDSERVER_MAX_PATH_LEN,
 			"%s%d.%d",
-			(style == TAPDISK_NBD_PROTOCOL_OLD)?TAPDISK_NBDSERVER_OLD_SOCK_PATH:TAPDISK_NBDSERVER_NEW_SOCK_PATH,
+			path,
 			getpid(),
 			vbd->uuid) < 0) {
 		ERR("Failed to snprintf sockpath");
@@ -1757,7 +1764,7 @@ tapdisk_nbdserver_listen_inet(td_nbdserver_t *server, const int port)
 		goto out;
 	}
 
-	err = listen(server->fdrecv_listening_fd, 10);
+	err = listen(server->fdrecv_listening_fd, MAX_LISTEN_BACKLOG);
 	if (err) {
 		err = -errno;
 		ERR("listen: %s", strerror(-err));
