@@ -119,6 +119,7 @@ struct tdnbd_data
 	enum tdnbd_state        state;
 
 	unsigned int            handle_id;
+	pthread_mutex_t         lock;
 };
 
 static void disable_write_queue(struct tdnbd_data *prv);
@@ -127,7 +128,7 @@ static void disable_write_queue(struct tdnbd_data *prv);
 /* -- fdreceiver bits and pieces -- */
 
 static void
-tdnbd_stash_passed_fd(int fd, char *msg, void *data) 
+tdnbd_stash_passed_fd(int fd, char *msg, void *data /* unused */)
 {
 	int free_index = -1;
 	int i;
@@ -218,7 +219,7 @@ __cancel_req(int i, struct td_nbd_request *pos, int e)
 }
 
 static void
-tdnbd_disable(struct tdnbd_data *prv, int e)
+tdnbd_disable_locked(struct tdnbd_data *prv, int e)
 {
 	struct td_nbd_request *pos, *q;
 	int i = 0;
@@ -316,13 +317,15 @@ tdnbd_writer_cb(event_id_t eb, char mode, void *data)
 	struct td_nbd_request *pos, *q;
 	struct tdnbd_data *prv = data;
 
+	pthread_mutex_lock(&prv->lock);
+
 	list_for_each_entry_safe(pos, q, &prv->pending_reqs, queue) {
 		if (tdnbd_write_some(prv->socket, &pos->header) > 0)
-			return;
+			goto out;
 
 		if (ntohs(pos->nreq.type) == TAPDISK_NBD_CMD_WRITE) {
 			if (tdnbd_write_some(prv->socket, &pos->body) > 0)
-				return;
+				goto out;
 		}
 
 		list_move(&pos->queue, &prv->sent_reqs);
@@ -331,6 +334,9 @@ tdnbd_writer_cb(event_id_t eb, char mode, void *data)
 	/* If we're here, we've written everything */
 
 	disable_write_queue(prv);
+
+out:
+	pthread_mutex_unlock(&prv->lock);
 
 	return;
 }
@@ -352,8 +358,8 @@ disable_write_queue(struct tdnbd_data *prv)
 }
 
 static int
-tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
-		char *buffer, uint32_t length, td_request_t treq, int fake)
+tdnbd_queue_request_locked(struct tdnbd_data *prv, int type, uint64_t offset,
+			   char *buffer, uint32_t length, td_request_t treq, int fake)
 {
 	if (prv->nr_free_count == 0) 
 		return -EBUSY;
@@ -398,6 +404,20 @@ tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
 	return 0;
 }
 
+static int
+tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
+		    char *buffer, uint32_t length, td_request_t treq, int fake)
+{
+	int rc;
+
+	pthread_mutex_lock(&prv->lock);
+	rc = tdnbd_queue_request_locked(prv, type, offset, buffer, length, treq, fake);
+	pthread_mutex_unlock(&prv->lock);
+
+	return rc;
+}
+
+
 /* NBD Reader callback */
 
 static void
@@ -407,22 +427,24 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 
 	/* Check to see if we're in the middle of reading a response already */
 	struct tdnbd_data *prv = data;
-	int rc = tdnbd_read_some(prv->socket, &prv->cur_reply_qio);
+	int rc;
+
+	pthread_mutex_lock(&prv->lock);
+
+	rc = tdnbd_read_some(prv->socket, &prv->cur_reply_qio);
 
 	if (rc < 0) {
 		ERROR("Error reading reply header: %d", rc);
-		tdnbd_disable(prv, EIO);
-		return;
+		goto err;
 	}
 
 	if (rc > 0)
-		return; /* need more data */
+		goto out; /* need more data */
 
 	/* Got a header. */
 	if (prv->current_reply.error != 0) {
 		ERROR("Error in reply: %d", prv->current_reply.error);
-		tdnbd_disable(prv, EIO);
-		return;
+		goto err;
 	}
 
 	/* Have we found the request yet? */
@@ -439,8 +461,7 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 		if (prv->curr_reply_req == NULL) {
 			ERROR("Couldn't find request corresponding to reply "
 					"(reply handle='%s')", prv->current_reply.handle);
-			tdnbd_disable(prv, EIO);
-			return;
+			goto err;
 		}
 	}
 
@@ -451,12 +472,11 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 
 		if (rc < 0) {
 			ERROR("Error reading body of request: %d", rc);
-			tdnbd_disable(prv, EIO);
-			return;
+			goto err;
 		}
 
 		if (rc > 0)
-			return; /* need more data */
+			goto out; /* need more data */
 
 		td_complete_request(prv->curr_reply_req->treq, 0);
 
@@ -469,8 +489,8 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 		ERROR("Unhandled request response: %d",
 				ntohs(prv->curr_reply_req->nreq.type));
 		do_disable = 1;
-		return;
-	} 
+		goto out;
+	}
 
 	/* remove the state */
 	list_move(&prv->curr_reply_req->queue, &prv->free_reqs);
@@ -489,7 +509,13 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 	 * moved
 	 */
 	if (do_disable)
-		tdnbd_disable(prv, EIO);
+		tdnbd_disable_locked(prv, EIO);
+
+	goto out;
+err:
+	tdnbd_disable_locked(prv, EIO);
+out:
+	pthread_mutex_unlock(&prv->lock);
 }
 
 /* Wait a certain maximum amount of time for a socket to be readable and then
@@ -763,8 +789,7 @@ tdnbd_connect_import_session(struct tdnbd_data *prv, td_driver_t* driver)
 		return -1;
 	}
 
-	prv->remote = (struct sockaddr_in *)malloc(
-			sizeof(struct sockaddr_in));
+	prv->remote = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in));
 	if (!prv->remote) {
 		ERROR("struct sockaddr_in malloc failure\n");
 		close(sock);
@@ -821,6 +846,8 @@ tdnbd_open(td_driver_t* driver, const char* name,
 	memset(prv, 0, sizeof(struct tdnbd_data));
 
 	INFO("Opening nbd export to %s (flags=%x)\n", name, flags);
+
+	pthread_mutex_init(&prv->lock, NULL);
 
 	prv->handle_id = 0;
 	prv->writer_event_id = -1;
@@ -986,13 +1013,17 @@ tdnbd_disconnect(struct tdnbd_data *prv)
 	if (rc < 0)
 		goto fail;
 
-	tdnbd_disable(prv, EIO);
+	pthread_mutex_lock(&prv->lock);
+	tdnbd_disable_locked(prv, EIO);
+	pthread_mutex_unlock(&prv->lock);
 
 	return 0;
 
 fail:
 	ERROR("NBD close: failed to disconnect cleanly: %d", rc);
-	tdnbd_disable(prv, EIO);
+	pthread_mutex_lock(&prv->lock);
+	tdnbd_disable_locked(prv, EIO);
+	pthread_mutex_unlock(&prv->lock);
 
 	return rc ? rc : -ETIMEDOUT;
 }
@@ -1071,7 +1102,7 @@ tdnbd_validate_parent(td_driver_t *driver,
 struct tap_disk tapdisk_nbd = {
 	.disk_type          = "tapdisk_nbd",
 	.private_data_size  = sizeof(struct tdnbd_data),
-	.flags              = 0,
+	.flags              = TD_DRIVER_MULTIQUEUE,
 	.td_open            = tdnbd_open,
 	.td_close           = tdnbd_close,
 	.td_queue_read      = tdnbd_queue_read,
