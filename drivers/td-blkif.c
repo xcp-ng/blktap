@@ -533,6 +533,22 @@ tapdisk_xenblkif_cb_chkrng(event_id_t id __attribute__((unused)),
 }
 
 
+/*
+ * Unmap the ring of a queue whose event channel isn't bound yet:
+ * tapdisk_xenblkif_destroy() only unmaps it through queue->ctx.
+ */
+static void
+tapdisk_xenblkif_unmap_ring(struct td_blkif_queue *queue,
+                            struct td_xenio_shared_ctx *shared_ctx, void *sring)
+{
+    unsigned int n_pages = queue->blkif->ring_n_pages;
+
+    if (xengnttab_unmap(shared_ctx->xcg_handle, sring, n_pages))
+        EPRINTF("failed to unmap ring page %p (%u pages): %s (error ignored)\n",
+                sring, n_pages, strerror(errno));
+    queue->rings.common.sring = NULL;
+}
+
 int
 tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX_RING_PAGES],
                          int order, int nr_queues, evtchn_port_t* ports, bool persistent_grant,
@@ -681,23 +697,14 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
             default:
                 RING_ERR(td_blkif, "unsupported protocol 0x%x\n", td_blkif->proto);
                 err = -EPROTONOSUPPORT;
+                tapdisk_xenblkif_unmap_ring(queue, shared_ctx, sring);
                 goto fail;
-        }
-
-        /*
-         * Bind to the remote port.
-         */
-        queue->ctx = tapdisk_xenio_ctx_bind_queue(shared_ctx, ports[qid], queue);
-        if (!queue->ctx) {
-            err = -errno;
-            RING_ERR(td_blkif, "failed to bind to event channel port %d: %s\n",
-                    ports[qid], strerror(-err));
-            goto fail;
         }
 
         err = tapdisk_xenblkif_reqs_init(queue);
         if (err) {
             /* TODO log error */
+            tapdisk_xenblkif_unmap_ring(queue, shared_ctx, sring);
             goto fail;
         }
 
@@ -708,6 +715,7 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
         if (unlikely(queue->chkrng_event < 0)) {
             err = queue->chkrng_event;
             RING_ERR(td_blkif, "failed to register event: %s\n", strerror(-err));
+            tapdisk_xenblkif_unmap_ring(queue, shared_ctx, sring);
             goto fail;
         }
 
@@ -718,6 +726,24 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
         if (unlikely(queue->stoppolling_event < 0)) {
             err = queue->stoppolling_event;
             RING_ERR(td_blkif, "failed to register event: %s\n", strerror(-err));
+            tapdisk_xenblkif_unmap_ring(queue, shared_ctx, sring);
+            goto fail;
+        }
+
+        /*
+         * Bind to the remote port, last: from now on the IO thread of the
+         * queue processes the ring, so the queue must be fully set up.
+         * Binding sets the port pending (Xen does it in case a notification
+         * was lost), so the ring is processed right away, even before the
+         * frontend sends its first request.
+         */
+        queue->ctx = tapdisk_xenio_ctx_bind_queue(shared_ctx, ports[qid], queue);
+        if (!queue->ctx) {
+            err = -errno;
+            RING_ERR(td_blkif, "failed to bind to event channel port %d: %s\n",
+                    ports[qid], strerror(-err));
+            /* without queue->ctx, tapdisk_xenblkif_destroy() can't unmap it */
+            tapdisk_xenblkif_unmap_ring(queue, shared_ctx, sring);
             goto fail;
         }
     }
