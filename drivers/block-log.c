@@ -47,10 +47,12 @@
 #define BITMAP_ENTRY(_nr, _bmap) ((unsigned long*)(_bmap + sizeof(struct cbt_log_metadata)))[((_nr)/BITS_PER_LONG)]
 #define BITMAP_SHIFT(_nr) ((_nr) % BITS_PER_LONG)
 
+#if 0
 static inline int test_bit(int nr, void* bmap)
 {
 	return (BITMAP_ENTRY(nr, bmap) >> BITMAP_SHIFT(nr)) & 1;
 }
+#endif
 
 static inline void set_bit(int nr, void* bmap)
 {
@@ -126,8 +128,12 @@ static int bitmap_set(struct tdlog_data* data, uint64_t block, int count)
 {
 	int i;
 
+	pthread_mutex_lock(&data->mutex);
+
 	for (i = 0; i < count; i++)
 		set_bit(block + i, data->bitmap);
+
+	pthread_mutex_unlock(&data->mutex);
 
 	return 0;
 }
@@ -138,7 +144,10 @@ static int bitmap_set(struct tdlog_data* data, uint64_t block, int count)
 static int tdlog_close(td_driver_t* driver)
 {
 	struct tdlog_data* data = (struct tdlog_data*)driver->data;
+
 	bitmap_free(data);
+
+	pthread_mutex_destroy(&data->mutex);
 
 	return 0;
 }
@@ -151,6 +160,8 @@ static int tdlog_open(td_driver_t* driver, const char *name,
 
 	memset(data, 0, sizeof(*data));
 	data->size = driver->info.size;
+
+	pthread_mutex_init(&data->mutex, NULL);
 
 	if ((rc = bitmap_init(data, driver->name))) {
 		tdlog_close(driver);
@@ -191,7 +202,7 @@ static int tdlog_validate_parent(td_driver_t *driver,
 struct tap_disk tapdisk_log = {
 	.disk_type          = "tapdisk_log",
 	.private_data_size  = sizeof(struct tdlog_data),
-	.flags              = 0,
+	.flags              = TD_DRIVER_MULTIQUEUE,
 	.td_open            = tdlog_open,
 	.td_close           = tdlog_close,
 	.td_queue_read      = tdlog_queue_read,

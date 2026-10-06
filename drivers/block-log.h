@@ -18,11 +18,14 @@
 #ifndef __BLOCK_LOG_H__
 #define __BLOCK_LOG_H__
 
+#include <pthread.h>
+
 #include "cbt-util.h"
 
 struct tdlog_data {
 	uint64_t   	size;
 	void*		bitmap;
+	pthread_mutex_t mutex;
 };
 
 #endif
