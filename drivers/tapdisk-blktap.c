@@ -220,8 +220,8 @@ tapdisk_blktap_fail_request(td_blktap_t *tap,
 }
 
 static void
-tapdisk_blktap_put_response(td_blktap_t *tap,
-			    td_blktap_req_t *req, int error, int final)
+tapdisk_blktap_put_response_locked(td_blktap_t *tap,
+				   td_blktap_req_t *req, int error, int final)
 {
 	blktap_ring_rsp_t *rsp;
 	int op = 0;
@@ -241,7 +241,6 @@ tapdisk_blktap_put_response(td_blktap_t *tap,
 		BUG();
 	}
 
-	pthread_mutex_lock(&tap->mutex);
 	rsp = BLKTAP_GET_RESPONSE(tap, tap->rsp_prod_pvt);
 
 	rsp->id        = req->id;
@@ -249,7 +248,6 @@ tapdisk_blktap_put_response(td_blktap_t *tap,
 	rsp->status    = tapdisk_blktap_error_status(tap, error);
 
 	__tapdisk_blktap_push_response_locked(tap, final);
-	pthread_mutex_unlock(&tap->mutex);
 
 	gettimeofday(&now, NULL);
 	interval = timeval_to_us(&now) - timeval_to_us(&req->ts);
@@ -274,10 +272,14 @@ tapdisk_blktap_complete_request(td_blktap_t *tap,
 				td_blktap_req_t *req, int error,
 				int final)
 {
+	pthread_mutex_lock(&tap->mutex);
+
 	if (likely(tap->vma))
-		tapdisk_blktap_put_response(tap, req, error, final);
+		tapdisk_blktap_put_response_locked(tap, req, error, final);
 
 	tapdisk_blktap_free_request_locked(tap, req);
+
+	pthread_mutex_unlock(&tap->mutex);
 }
 
 static void
@@ -567,7 +569,9 @@ __tapdisk_blktap_close(td_blktap_t *tap)
 		tap->event_id = -1;
 	}
 
+	pthread_mutex_lock(&tap->mutex);
 	tapdisk_blktap_unmap(tap);
+	pthread_mutex_unlock(&tap->mutex);
 
 	if (tap->fd >= 0) {
 		close(tap->fd);
