@@ -109,6 +109,16 @@ typedef struct tapdisk_server {
 	 */
 	int                          reaper_eventfd;
 	event_id_t                   reaper_evid;
+
+	/*
+	 * Written to wake the main scheduler up when another thread changes
+	 * its events (e.g. an IO thread unmasking the writer event of the
+	 * NBD client): its select() would otherwise only see the change on
+	 * its next wakeup. See tapdisk_server_scheduler_wake().
+	 */
+	pthread_t                    main_tid;
+	int                          wake_eventfd;
+	event_id_t                   wake_evid;
 } tapdisk_server_t;
 
 static tapdisk_server_t server;
@@ -235,12 +245,56 @@ tapdisk_server_check_state(void)
 		atomic_store(&server.run, 0);
 }
 
+void
+tapdisk_server_scheduler_wake(void)
+{
+	uint64_t token = 1;
+	int n;
+
+	if (server.wake_eventfd == -1)
+		return;
+
+	n = write(server.wake_eventfd, &token, sizeof(token));
+	ASSERT(n == 8);
+}
+
+static void
+tapdisk_server_wake_event(event_id_t id __attribute__((unused)),
+			  char mode __attribute__((unused)),
+			  void *private __attribute__((unused)))
+{
+	uint64_t cnt;
+	int n;
+
+	n = read(server.wake_eventfd, &cnt, sizeof(cnt));
+	ASSERT(n == 8);
+}
+
+/*
+ * Wake the main scheduler up after a change of its events made from
+ * another thread. The main thread itself doesn't need it: it takes the
+ * change into account before its next select().
+ */
+static inline void
+tapdisk_server_wake_from_other_thread(void)
+{
+	if (!pthread_equal(pthread_self(), server.main_tid))
+		tapdisk_server_scheduler_wake();
+}
+
 event_id_t
 tapdisk_server_register_event(char mode, int fd,
 			      struct timeval timeout, event_cb_t cb, void *data)
 {
-	return scheduler_register_event(&server.scheduler,
-					mode, fd, timeout, cb, data);
+	event_id_t eid;
+
+	eid = scheduler_register_event(&server.scheduler,
+				       mode, fd, timeout, cb, data);
+
+	/* Wake the main thread up to use the newly registered event */
+	tapdisk_server_wake_from_other_thread();
+
+	return eid;
 }
 
 void
@@ -252,7 +306,11 @@ tapdisk_server_unregister_event(event_id_t event)
 void
 tapdisk_server_mask_event(event_id_t event, int masked)
 {
-	return scheduler_mask_event(&server.scheduler, event, masked);
+	scheduler_mask_event(&server.scheduler, event, masked);
+
+	/* Wake the main thread up to watch the unmasked event */
+	if (!masked)
+		tapdisk_server_wake_from_other_thread();
 }
 
 void
@@ -523,6 +581,14 @@ tapdisk_server_close(void)
 
 	if (likely(server.reaper_eventfd != -1))
 		close(server.reaper_eventfd);
+
+	if (likely(server.wake_evid >= 0))
+		tapdisk_server_unregister_event(server.wake_evid);
+
+	if (likely(server.wake_eventfd != -1)) {
+		close(server.wake_eventfd);
+		server.wake_eventfd = -1;
+	}
 
 	if (likely(server.tlog_reopen_evid >= 0))
 		tapdisk_server_unregister_event(server.tlog_reopen_evid);
@@ -954,6 +1020,8 @@ tapdisk_server_init(void)
 	server.signal_handler_evid = -1;
 	server.reaper_eventfd = -1;
 	server.reaper_evid = -1;
+	server.wake_eventfd = -1;
+	server.wake_evid = -1;
 
 	scheduler_initialize(&server.scheduler);
 
@@ -1098,6 +1166,26 @@ tapdisk_server_complete(void)
 		goto fail;
 	}
 	server.reaper_evid = err;
+
+	/* After daemonizing: the thread running the main scheduler */
+	server.main_tid = pthread_self();
+
+	/* Must exist before the IO threads that write to it are started. */
+	server.wake_eventfd = eventfd(0, 0);
+	if (server.wake_eventfd == -1) {
+		err = -errno;
+		EPRINTF("failed to create wake eventfd: %s\n", strerror(errno));
+		goto fail;
+	}
+
+	err = tapdisk_server_register_event(SCHEDULER_POLL_READ_FD,
+					    server.wake_eventfd, TV_INF,
+					    tapdisk_server_wake_event, NULL);
+	if (err < 0) {
+		EPRINTF("failed to register wake event: %s\n", strerror(-err));
+		goto fail;
+	}
+	server.wake_evid = err;
 
 	err = tapdisk_server_io_thread_init();
 	if (err)
