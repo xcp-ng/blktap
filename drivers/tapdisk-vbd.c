@@ -71,6 +71,23 @@ void tapdisk_vbd_event_cb(event_id_t id __attribute__((unused)),
 static bool log=true;
 
 /*
+ * Wake the IO thread of the queue up (its eventfd is watched by that
+ * thread), for it to return the completed requests to their source.
+ */
+static void
+tapdisk_vbd_wake_queue(td_vbd_queue_t *queue)
+{
+	static const uint64_t token = 1;
+	ssize_t s;
+
+	if (queue->efd < 0)
+		return;
+
+	s = write(queue->efd, &token, sizeof(token));
+	ASSERT(s == sizeof(token));
+}
+
+/*
  * initialization
  */
 
@@ -1515,6 +1532,18 @@ __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
 	notify = tapdisk_vbd_complete_vbd_request(queue, vreq);
 	pthread_mutex_unlock(&queue->mutex);
 
+	/*
+	 * The IO thread of the queue returns the completed requests to their
+	 * source (blkif, blktap...) in tapdisk_server_kick_responses(). When
+	 * the request completes on another thread (e.g. a mirror write
+	 * completed by the NBD client on the main thread), wake it up:
+	 * otherwise the response waits until something else wakes it up, which
+	 * may never happen if the guest stopped sending requests (e.g. while
+	 * suspending for a live migration).
+	 */
+	if (notify && !tapdisk_server_in_io_thread(queue - vbd->queues))
+		tapdisk_vbd_wake_queue(queue);
+
 	if (err != -EBUSY) {
 		int write = treq.op == TD_OP_WRITE;
 		// FIXME: should we take a lock here for stats ? or use an atomic ?
@@ -2114,7 +2143,6 @@ tapdisk_vbd_kick(td_vbd_queue_t *queue, bool scheduler_kick)
 {
 	const struct list_head *list;
 	td_vbd_request_t *vreq, *prev, *next;
-	ssize_t s;
 	td_vbd_t *vbd = queue->vbd;
 
 	queue->kicked++;
@@ -2155,16 +2183,8 @@ tapdisk_vbd_kick(td_vbd_queue_t *queue, bool scheduler_kick)
 	}
 	pthread_mutex_unlock(&queue->mutex);
 
-	if (scheduler_kick && td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED)) {
-		static uint64_t token = 1;
-
-		if (queue->efd < 0) {
-		    return;
-		}
-
-		s = write(queue->efd, &token, sizeof(uint64_t));
-		ASSERT(s == sizeof(uint64_t));
-	}
+	if (scheduler_kick && td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED))
+		tapdisk_vbd_wake_queue(queue);
 }
 
 int

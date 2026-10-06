@@ -71,6 +71,8 @@ void tapdisk_server_unregister_io_event(td_queue_id_t qid, event_id_t);
 void tapdisk_server_mask_io_event(td_queue_id_t qid, event_id_t, int);
 void tapdisk_server_set_io_max_timeout(td_queue_id_t qid, int);
 void tapdisk_server_io_scheduler_wake(td_queue_id_t);
+/* Whether the caller runs on the IO thread of the queue */
+bool tapdisk_server_in_io_thread(td_queue_id_t qid);
 
 /*
  * Callable from IO threads: asks the main thread to reap the dead
