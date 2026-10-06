@@ -48,6 +48,22 @@
 void tdnbd_fdreceiver_start();
 void tdnbd_fdreceiver_stop();
 
+#ifdef __SANITIZE_ADDRESS__
+/*
+ * Default ASan options, read by libasan before main(): tapdisk is spawned
+ * by tap-ctl, whose environment we don't control. ASAN_OPTIONS still
+ * overrides them.
+ * - handle_abort: report the stack of an abort(), e.g. a failed ASSERT
+ * - symbolize=0: don't symbolize in the crashing process, which can crash
+ *   again; symbolize offline with addr2line
+ * - log_path: write the report to <log_path>.<pid>, whatever stderr is
+ */
+const char *__asan_default_options(void)
+{
+	return "handle_abort=1:symbolize=0:log_path=/var/log/blktap/asan";
+}
+#endif
+
 static void
 usage(const char *app, int err)
 {
