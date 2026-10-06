@@ -63,6 +63,10 @@ static bool tapdisk_vbd_complete_vbd_request(td_vbd_queue_t *, td_vbd_request_t 
 static bool tapdisk_vbd_queue_ready(td_vbd_t *);
 static void tapdisk_vbd_check_complete_requests(td_vbd_queue_t *);
 static void tapdisk_vbd_check_requests_for_issue(td_vbd_queue_t *);
+static void tapdisk_vbd_release_queues_event(td_vbd_t *);
+
+void tapdisk_vbd_event_cb(event_id_t id __attribute__((unused)),
+			  char mode __attribute__((unused)), void *private);
 
 static bool log=true;
 
@@ -109,13 +113,38 @@ tapdisk_vbd_create(uint16_t uuid)
 		tapdisk_vbd_mark_progress(queue);
 	}
 
+	/* All the queues are initialized first, so that the failure path only releases valid events */
+	for (int i = 0; i < ARRAY_SIZE(vbd->queues); i++) {
+		td_vbd_queue_t* queue = &vbd->queues[i];
+
+		queue->efd = eventfd(0, 0);
+		if (queue->efd == -1) {
+			ERROR("Failed to create eventfd: %s\n", strerror(errno));
+			goto fail;
+		}
+
+		queue->event = tapdisk_server_register_io_event(i,
+					SCHEDULER_POLL_READ_FD, queue->efd, TV_INF,
+					tapdisk_vbd_event_cb, queue);
+		if (unlikely(queue->event < 0)) {
+			ERROR("Failed to register eventfd: %s\n", strerror(errno));
+			goto fail;
+		}
+	}
+
 	INIT_LIST_HEAD(&vbd->images);
 	INIT_LIST_HEAD(&vbd->next);
 	INIT_LIST_HEAD(&vbd->rings);
 	INIT_LIST_HEAD(&vbd->dead_rings);
 
-
 	return vbd;
+fail:
+	tapdisk_vbd_release_queues_event(vbd);
+	for (int i = 0; i < ARRAY_SIZE(vbd->queues); i++) {
+		pthread_mutex_destroy(&vbd->queues[i].mutex);
+	}
+	free(vbd);
+	return NULL;
 }
 
 int
@@ -265,18 +294,21 @@ out:
 static void
 tapdisk_vbd_release_queues_event(td_vbd_t *vbd)
 {
-    for (int qid = 0; qid < ARRAY_SIZE(vbd->queues); qid++) {
-        td_vbd_queue_t* queue = &vbd->queues[qid];
+	/* FIXME: ASSERT(pthread_self() == main_thread */
+	/*    We MUST not close a fd that already used in another thread
+	      The easiest way is to run that in the same thread */
+	for (int qid = 0; qid < ARRAY_SIZE(vbd->queues); qid++) {
+		td_vbd_queue_t* queue = &vbd->queues[qid];
 
-        if (queue->event > 0) {
-            tapdisk_server_unregister_io_event(qid, queue->event);
-            queue->event = -1;
-        }
-        if (queue->efd > 0) {
-                close(queue->efd);
-                queue->efd = -1;
-        }
-    }
+		if (queue->event >= 0) {
+			tapdisk_server_unregister_io_event(qid, queue->event);
+			queue->event = -1;
+		}
+		if (queue->efd >= 0) {
+			close(queue->efd);
+			queue->efd = -1;
+		}
+	}
 }
 
 void
@@ -309,10 +341,6 @@ tapdisk_vbd_close_vdi(td_vbd_t *vbd)
 	}
 
 	td_atomic_flag_set(vbd->state, TD_VBD_CLOSED);
-
-	if (td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED)) {
-		tapdisk_vbd_release_queues_event(vbd);
-	}
 }
 
 static int
@@ -623,7 +651,7 @@ unlock:
 	pthread_mutex_unlock(&queue->mutex);
 }
 
-int 
+int
 tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_devnum, td_err *error)
 {
 	char *tmp = vbd->name;
@@ -654,30 +682,6 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 		goto fail;
 
 	vbd->driver_flags = tapdisk_vbd_first_image(vbd)->driver->ops->flags;
-
-	if (td_flag_test(vbd->driver_flags, TD_DRIVER_THREADED)) {
-
-		/* Should wake the write thread/blkif */
-		for (int qid = 0; qid < ARRAY_SIZE(vbd->queues); qid++) {
-			td_vbd_queue_t* queue = &vbd->queues[qid];
-
-			queue->efd = eventfd(0, 0);
-			if (queue->efd == -1) {
-				err = -errno;
-				ERROR("Failed to create eventfd: %s\n", strerror(-err));
-				goto fail;
-			}
-
-			queue->event = tapdisk_server_register_io_event(qid,
-				SCHEDULER_POLL_READ_FD, queue->efd, TV_INF,
-				tapdisk_vbd_event_cb, queue);
-			if (unlikely(queue->event < 0)) {
-				err = queue->event;
-				ERROR("Failed to register eventfd: %s\n", strerror(-err));
-				goto fail;
-			}
-		}
-	}
 
 	td_atomic_flag_clear(vbd->state, TD_VBD_CLOSED);
 	vbd->flags = flags;
@@ -735,8 +739,6 @@ fail:
 		free(vbd->name);
 		vbd->name = tmp;
 	}
-
-	tapdisk_vbd_release_queues_event(vbd);
 
 	if (!list_empty(&vbd->images))
 		tapdisk_image_close_chain(&vbd->images);
@@ -898,6 +900,8 @@ tapdisk_vbd_shutdown(td_vbd_t *vbd)
 void
 tapdisk_vbd_free(td_vbd_t *vbd)
 {
+	tapdisk_vbd_release_queues_event(vbd);
+
 	pthread_mutex_destroy(&vbd->mutex);
 	free(vbd->name);
 	free(vbd->encryption.encryption_key);
