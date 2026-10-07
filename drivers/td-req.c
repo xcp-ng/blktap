@@ -963,9 +963,6 @@ tapdisk_xenblkif_reqs_free(struct td_blkif_queue* queue)
 
     free(queue->reqs_free);
     queue->reqs_free = NULL;
-
-    /* TODO: to be moved */
-    pthread_mutex_destroy(&queue->mutex);
 }
 
 int

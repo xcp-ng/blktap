@@ -253,6 +253,13 @@ tapdisk_xenblkif_destroy(struct td_xenblkif * blkif)
                 tapdisk_xenio_shared_ctx_put(shared_ctx);
             }
         }
+
+        /*
+         * Initialised by tapdisk_xenblkif_connect(): destroyed here, once
+         * nothing can use the queue anymore, and only once (it used to be
+         * in tapdisk_xenblkif_reqs_free(), also called on a reqs_init failure).
+         */
+        pthread_mutex_destroy(&queue->mutex);
     }
 
     err = td_metrics_vbd_stop(&blkif->vbd_stats);
