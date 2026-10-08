@@ -69,6 +69,9 @@
 #define NBD_SERVER_NUM_REQS 8
 #define MAX_REQUEST_SIZE (64 * MEGABYTES)
 
+/* buffers up to this size are kept: NBD_SERVER_NUM_REQS (8) per client => 32 MiB at most */
+#define NBD_SERVER_KEPT_BUFFER_MAX (4 * MEGABYTES)
+
 uint16_t gflags = (NBD_FLAG_FIXED_NEWSTYLE | NBD_FLAG_NO_ZEROES);
 
 /*
@@ -91,7 +94,55 @@ struct td_nbdserver_req {
 	td_vbd_request_t        vreq;
 	char                    id[16];
 	struct td_iovec         iov;
+	/* data buffer kept between two uses of this request */
+	void                   *buf;
+	size_t                  buf_size;
 };
+
+/*
+ * Reuses the buffer of the request instead of allocating and freeing one forevery
+ * request: it made glibc grow and trim its heap (brk), each time a hypercall in a
+ * PV dom0, and halved the throughput.
+ */
+static void *
+nbdreq_buffer_get(td_nbdserver_req_t *req, size_t len)
+{
+	if (req->buf && req->buf_size >= len)
+		return req->buf;
+	free(req->buf);
+	req->buf = NULL;
+	req->buf_size = 0;
+	/* posix_memalign returns an error number, not -1 */
+	if (posix_memalign(&req->buf, 512, len) != 0) {
+		req->buf = NULL;
+		return NULL;
+	}
+	req->buf_size = len;
+	return req->buf;
+}
+
+/* When the request completes: only the oversized buffers are given back */
+static void
+nbdreq_buffer_put(td_nbdserver_req_t *req)
+{
+	if (req->buf_size > NBD_SERVER_KEPT_BUFFER_MAX) {
+		free(req->buf);
+		req->buf = NULL;
+		req->buf_size = 0;
+	}
+}
+
+static void
+nbdreq_init(td_nbdserver_req_t *req)
+{
+	/* the buffer of the previous use of this request is kept */
+	void *buf = req->buf;
+	size_t buf_size = req->buf_size;
+
+	memset(req, 0, sizeof(td_nbdserver_req_t));
+	req->buf = buf;
+	req->buf_size = buf_size;
+}
 
 int recv_fully_or_fail(int f, void *buf, size_t len) {
 	ssize_t res;
@@ -344,6 +395,10 @@ static void
 tapdisk_nbdserver_reqs_free(td_nbdserver_client_t *client)
 {
 	if (client->reqs) {
+		int i;
+
+		for (i = 0; i < client->n_reqs; i++)
+			free(client->reqs[i].buf);
 		free(client->reqs);
 		client->reqs = NULL;
 	}
@@ -723,7 +778,8 @@ tapdisk_nbdserver_reqs_init(td_nbdserver_client_t *client, int n_reqs)
 
 	INFO("Reqs init");
 
-	client->reqs = malloc(n_reqs * sizeof(td_nbdserver_req_t));
+	/* zeroed: the requests own their data buffer (buf), NULL until first used */
+	client->reqs = calloc(n_reqs, sizeof(td_nbdserver_req_t));
 	if (!client->reqs) {
 		err = -errno;
 		goto fail;
@@ -874,7 +930,7 @@ static void tapdisk_nbd_server_free_vreq(
 	td_nbdserver_client_t *client, td_vbd_request_t *vreq, bool free_client_if_dead)
 {
 	td_nbdserver_req_t *req = container_of(vreq, td_nbdserver_req_t, vreq);
-	free(vreq->iov->base);
+	nbdreq_buffer_put(req);
 	tapdisk_nbdserver_free_request(client, req, free_client_if_dead);
 }
 
@@ -971,7 +1027,7 @@ __tapdisk_nbdserver_structured_read_cb(
 		server->nbd_stats.stats->io_errors++;
 
 finish:
-	free(vreq->iov->base);
+	nbdreq_buffer_put(req);
 	tapdisk_nbdserver_free_request(client, req, true);
 }
 
@@ -1036,7 +1092,7 @@ __tapdisk_nbdserver_request_cb(td_vbd_request_t *vreq, int error,
 		server->nbd_stats.stats->io_errors++;
 
 finish:
-	free(vreq->iov->base);
+	nbdreq_buffer_put(req);
 	tapdisk_nbdserver_free_request(client, req, true);
 }
 
@@ -1207,7 +1263,6 @@ tapdisk_nbdserver_newclient_fd(td_nbdserver_t *server, int new_fd)
 static td_vbd_request_t *create_request_vreq(
 	td_nbdserver_client_t *client, struct nbd_request request, uint32_t len)
 {
-	int rc;
 	td_nbdserver_t *server = client->server;
 	td_vbd_request_t *vreq;
 	td_nbdserver_req_t *req;
@@ -1220,14 +1275,12 @@ static td_vbd_request_t *create_request_vreq(
 
 	vreq = &req->vreq;
 
-	memset(req, 0, sizeof(td_nbdserver_req_t));
-
-	bzero(req->id, sizeof(req->id));
+	nbdreq_init(req);
 	memcpy(req->id, request.handle, sizeof(request.handle));
 
-	rc = posix_memalign(&req->iov.base, 512, len);
-	if (rc < 0) {
-		ERR("posix_memalign failed (%d)", rc);
+	req->iov.base = request_buffer_get(req, len);
+	if (!req->iov.base) {
+		ERR("can't allocate a %zu bytes buffer", (size_t)len);
 		goto fail;
 	}
 
