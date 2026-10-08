@@ -1836,6 +1836,25 @@ tapdisk_nbdserver_free(td_nbdserver_t *server)
 	free(server);
 }
 
+/*
+ * Requests of all the clients of the server not completed yet, including those
+ * of the clients freed while they had some (marked dead).
+ */
+int
+tapdisk_nbdserver_server_reqs_pending(td_nbdserver_t *server)
+{
+	struct td_nbdserver_client *pos;
+	int pending = 0;
+
+	ASSERT(server);
+
+	pthread_mutex_lock(&server->mutex);
+	list_for_each_entry(pos, &server->clients, clientlist)
+		pending += tapdisk_nbdserver_reqs_pending(pos);
+	pthread_mutex_unlock(&server->mutex);
+	return pending;
+}
+
 int
 tapdisk_nbdserver_reqs_pending(td_nbdserver_client_t *client)
 {
