@@ -668,6 +668,35 @@ unlock:
 	pthread_mutex_unlock(&queue->mutex);
 }
 
+/*
+ * The VBD capabilities are those of its whole chain: every layer must
+ * be multi-queue capable, while a single threaded layer is enough to
+ * complete requests outside of the IO threads.
+ */
+static void
+tapdisk_vbd_update_driver_flags(td_vbd_t *vbd)
+{
+	td_image_t *image, *tmp;
+	td_flag_t all, any;
+
+	all = TD_DRIVER_MULTIQUEUE;
+	any = 0;
+
+	tapdisk_vbd_for_each_image(vbd, image, tmp) {
+		all &= image->driver->ops->flags;
+		any |= image->driver->ops->flags;
+	}
+
+	/* The NBD mirror sits outside of the chain but receives every write */
+	if (vbd->secondary) {
+		all &= vbd->secondary->driver->ops->flags;
+		any |= vbd->secondary->driver->ops->flags;
+	}
+
+	vbd->driver_flags = (all & TD_DRIVER_MULTIQUEUE) |
+			    (any & TD_DRIVER_THREADED);
+}
+
 int
 tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_devnum, td_err *error)
 {
@@ -697,8 +726,6 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 	err = tapdisk_image_open_chain(vbd->name, flags, prt_devnum, &vbd->encryption, &vbd->images, error);
 	if (err)
 		goto fail;
-
-	vbd->driver_flags = tapdisk_vbd_first_image(vbd)->driver->ops->flags;
 
 	td_atomic_flag_clear(vbd->state, TD_VBD_CLOSED);
 	vbd->flags = flags;
@@ -738,6 +765,9 @@ tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_d
 		if (err)
 			goto fail;
 	}
+
+	/* Once all the layers are added */
+	tapdisk_vbd_update_driver_flags(vbd);
 
 	err = vbd_stats_create(vbd);
 	if (err)
@@ -1204,6 +1234,19 @@ tapdisk_vbd_resume(td_vbd_t *vbd, const char *name, td_err *error)
 			EPRINTF("VBD %d cannot change disk info\n", vbd->uuid);
 			err = -EMEDIUMTYPE;
 			goto resume_failed;
+		}
+
+		/* The number of queues was negotiated with the frontend */
+		if (!td_flag_test(vbd->driver_flags, TD_DRIVER_MULTIQUEUE)) {
+			list_for_each_entry(blkif, &vbd->rings, entry) {
+				if (blkif->nr_queues <= 1)
+					continue;
+
+				EPRINTF("VBD %d cannot lose multi-queue support\n",
+					vbd->uuid);
+				err = -EOPNOTSUPP;
+				goto resume_failed;
+			}
 		}
 	}
 resume_failed:
