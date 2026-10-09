@@ -40,6 +40,7 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <sys/un.h>
+#include <fcntl.h>
 #include "tapdisk-protocol-new.h"
 #include <byteswap.h>
 
@@ -1401,6 +1402,9 @@ tapdisk_nbdserver_fdreceiver_cb(int fd, int conn_fd, char *msg, void *data)
 	}
 	client->client_fd = fd;
 	client->handoff_fd = conn_fd;
+
+	/* The sender's fd may be non-blocking, the server relies on blocking I/O */
+	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
 
 	bzero(&reply, sizeof(reply));
 	reply.exportsize = htobe64(NBD_EXPORTSIZE(server));
