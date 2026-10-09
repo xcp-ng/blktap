@@ -155,6 +155,12 @@ struct td_nbdserver_client {
 	 */
 	bool                    structured_reply;
 
+	/**
+	 * Connection the client_fd was handed over on, to be closed when the
+         * client is freed so that the sender can tell when the session ends
+	 */
+	int                     handoff_fd;
+
 	int                     max_used_reqs;
 };
 

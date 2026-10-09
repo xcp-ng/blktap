@@ -828,6 +828,7 @@ tapdisk_nbdserver_alloc_client(td_nbdserver_t *server)
 	client->paused = 0;
 	client->dead = false;
 	client->structured_reply = false;
+	client->handoff_fd = -1;
 
 	return client;
 
@@ -855,6 +856,8 @@ tapdisk_nbdserver_free_client(td_nbdserver_client_t *client)
 	if (likely(!tapdisk_nbdserver_reqs_pending(client))) {
 		list_del(&client->clientlist);
 		tapdisk_nbdserver_reqs_free(client);
+		if (client->handoff_fd >= 0)
+			close(client->handoff_fd);
 		pthread_mutex_destroy(&client->mutex);
 		free(client);
 	} else
@@ -1368,9 +1371,11 @@ fail:
 }
 
 static void
-tapdisk_nbdserver_fdreceiver_cb(int fd, char *msg, void *data)
+tapdisk_nbdserver_fdreceiver_cb(int fd, int conn_fd, char *msg, void *data)
 {
 	td_nbdserver_t *server = data;
+	td_nbdserver_client_t *client;
+	struct nbd_export_name_option_reply reply;
 
 	ASSERT(server);
 	ASSERT(msg);
@@ -1378,7 +1383,36 @@ tapdisk_nbdserver_fdreceiver_cb(int fd, char *msg, void *data)
 
 	INFO("Received fd %d with msg: %s", fd, msg);
 
-	tapdisk_nbdserver_newclient_fd(server, fd);
+	if (server->style == TAPDISK_NBD_PROTOCOL_OLD) {
+		close(conn_fd);
+		tapdisk_nbdserver_newclient_fd(server, fd);
+		return;
+	}
+
+	/*
+	 * xapi-nbd negotiated up to and including NBD_OPT_EXPORT_NAME,
+	 * only the reply to it is left
+	 */
+	client = tapdisk_nbdserver_alloc_client(server);
+	if (client == NULL) {
+		close(conn_fd);
+		close(fd);
+		return;
+	}
+	client->client_fd = fd;
+	client->handoff_fd = conn_fd;
+
+	bzero(&reply, sizeof(reply));
+	reply.exportsize = htobe64(NBD_EXPORTSIZE(server));
+	reply.eflags = htobe16(NBD_FLAGS);
+
+	if (send_fully_or_fail(fd, &reply, sizeof(reply)) < 0 ||
+	    tapdisk_nbdserver_enable_client(client) < 0) {
+		pthread_mutex_lock(&server->mutex);
+		tapdisk_nbdserver_free_client(client);
+		pthread_mutex_unlock(&server->mutex);
+		close(fd);
+	}
 }
 
 static void

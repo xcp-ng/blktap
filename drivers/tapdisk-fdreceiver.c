@@ -56,7 +56,7 @@ static void
 td_fdreceiver_recv_fd(event_id_t id, char mode, void *data)
 {
 	struct td_fdreceiver *fdreceiver = data;
-	int ret,  cv_flags = 0, *fdp, fd = -1;
+	int ret,  cv_flags = 0, *fdp, fd = -1, conn_fd;
 	long numbytes;
 	char *iobuf;
 	char buf[CMSG_SPACE(sizeof(fd))];
@@ -107,11 +107,7 @@ td_fdreceiver_recv_fd(event_id_t id, char mode, void *data)
 
 	INFO("Received fd %d with message: %s", fd, iobuf);
 
-	/*
-	 * We're done with this connection, it was only transiently used to
-	 * connect the client
-	 */
-	close(fdreceiver->client_fd);
+	conn_fd = fdreceiver->client_fd;
 	fdreceiver->client_fd = -1;
 
 	tapdisk_server_unregister_event(fdreceiver->client_event_id);
@@ -119,11 +115,13 @@ td_fdreceiver_recv_fd(event_id_t id, char mode, void *data)
 
 	/*
 	 * It is the responsibility of this callback function to arrange that
-	 * the fd is eventually closed
+	 * the fd and conn_fd are eventually closed
 	 */
-	if (fd >= 0) {
-		fdreceiver->callback(fd, iobuf, fdreceiver->callback_data);
-	}
+	if (fd >= 0)
+		fdreceiver->callback(fd, conn_fd, iobuf,
+				fdreceiver->callback_data);
+	else
+		close(conn_fd);
 out:
 	free(iobuf);
 }

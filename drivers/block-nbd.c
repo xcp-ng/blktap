@@ -166,6 +166,13 @@ tdnbd_stash_passed_fd(int fd, char *msg, void *data)
 		     sizeof(passed_fds[free_index].id));
 }
 
+static void
+tdnbd_fdreceiver_cb(int fd, int conn_fd, char *msg, void *data)
+{
+	close(conn_fd);
+	tdnbd_stash_passed_fd(fd, msg, data);
+}
+
 static int
 tdnbd_retrieve_passed_fd(const char *name)
 {
@@ -199,7 +206,7 @@ tdnbd_fdreceiver_start()
 			"%s%d", TAPDISK_NBDCLIENT_LISTEN_SOCK_PATH, getpid());
 
 	fdreceiver = td_fdreceiver_start(fdreceiver_path,
-			tdnbd_stash_passed_fd, NULL);
+			tdnbd_fdreceiver_cb, NULL);
 
 }
 

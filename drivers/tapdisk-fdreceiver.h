@@ -29,7 +29,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-typedef void (*fd_cb_t) (int fd, char *msg, void *data);
+/* conn_fd is the connection fd was received on */
+typedef void (*fd_cb_t) (int fd, int conn_fd, char *msg, void *data);
 
 struct td_fdreceiver *td_fdreceiver_start(char *path, fd_cb_t, void *data);
 void td_fdreceiver_stop(struct td_fdreceiver *);
