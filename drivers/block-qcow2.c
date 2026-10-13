@@ -839,6 +839,11 @@ _qcow2_close(td_driver_t *driver)
 		struct qcow2_queue *q = &s->queue[qid];
 		qemu_bh_schedule(q->bh);
 	}
+	/*
+	 * The bh of the queues run in their IOThread: also wake the main loop
+	 * of the thread, which waits for driver_opened to change.
+	 */
+	qemu_notify_event();
 	pthread_mutex_unlock(&s->lock);
 
 	// Ignore return, qcow2_open() always return NULL; or will abort
