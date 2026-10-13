@@ -1529,14 +1529,16 @@ static int
 qcow2_pending(td_driver_t *driver)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
-	int n_pending;
-	unsigned int n_count = 0;
+	int n_pending = 0;
 
-	pthread_mutex_lock(&s->lock);
-	for (int i = 0; i < ARRAY_SIZE(s->queue); i++)
-	    n_count += s->queue[i].vreq_free_count;
-	n_pending = QCOW2_REQS - n_count;
-	pthread_mutex_unlock(&s->lock);
+	/* Each queue has its own QCOW2_REQS requests, protected by its lock. */
+	for (int i = 0; i < ARRAY_SIZE(s->queue); i++) {
+		struct qcow2_queue *q = &s->queue[i];
+
+		pthread_mutex_lock(&q->lock);
+		n_pending += QCOW2_REQS - q->vreq_free_count;
+		pthread_mutex_unlock(&q->lock);
+	}
 
 	return n_pending;
 }
