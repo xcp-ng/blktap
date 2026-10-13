@@ -48,7 +48,18 @@ struct blkif_x86_32_response {
 	uint8_t         operation;       /* copied from request */
 	int16_t         status;          /* BLKIF_RSP_???       */
 };
+struct blkif_x86_32_request_indirect {
+	uint8_t        operation;    /* BLKIF_OP_INDIRECT                    */
+	uint8_t        indirect_op;  /* BLKIF_OP_{READ/WRITE}                */
+	uint16_t       nr_segments;  /* number of segments                   */
+	uint64_t       id;           /* private guest value, echoed in resp  */
+	blkif_sector_t sector_number;/* start sector idx on disk (r/w only)  */
+	blkif_vdev_t   handle;       /* same as for read/write requests      */
+	grant_ref_t    indirect_grefs[BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST];
+	uint64_t       pad;          /* Make it 64 byte aligned on i386      */
+};
 typedef struct blkif_x86_32_request blkif_x86_32_request_t;
+typedef struct blkif_x86_32_request_indirect blkif_x86_32_request_indirect_t;
 typedef struct blkif_x86_32_response blkif_x86_32_response_t;
 #pragma pack(pop)
 
@@ -66,7 +77,17 @@ struct blkif_x86_64_response {
 	uint8_t         operation;       /* copied from request */
 	int16_t         status;          /* BLKIF_RSP_???       */
 };
+struct blkif_x86_64_request_indirect {
+	uint8_t        operation;    /* BLKIF_OP_INDIRECT                    */
+	uint8_t        indirect_op;  /* BLKIF_OP_{READ/WRITE}                */
+	uint16_t       nr_segments;  /* number of segments                   */
+	uint64_t       __attribute__((__aligned__(8))) id;
+	blkif_sector_t sector_number;/* start sector idx on disk (r/w only)  */
+	blkif_vdev_t   handle;       /* same as for read/write requests      */
+	grant_ref_t    indirect_grefs[BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST];
+};
 typedef struct blkif_x86_64_request blkif_x86_64_request_t;
+typedef struct blkif_x86_64_request_indirect blkif_x86_64_request_indirect_t;
 typedef struct blkif_x86_64_response blkif_x86_64_response_t;
 
 DEFINE_RING_TYPES(blkif_common, struct blkif_common_request, struct blkif_common_response);
@@ -92,6 +113,21 @@ static inline void blkif_get_x86_32_req(blkif_request_t *dst, blkif_x86_32_reque
 	int i, n = BLKIF_MAX_SEGMENTS_PER_REQUEST;
 
 	dst->operation = src->operation;
+	/* The layout of the request depends on its operation: read it once */
+	asm volatile ("" ::: "memory");
+	if (dst->operation == BLKIF_OP_INDIRECT) {
+		blkif_x86_32_request_indirect_t *s = (void *)src;
+		blkif_request_indirect_t *d = (void *)dst;
+
+		d->indirect_op = s->indirect_op;
+		d->nr_segments = s->nr_segments;
+		d->id = s->id;
+		d->sector_number = s->sector_number;
+		d->handle = s->handle;
+		for (i = 0; i < BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST; i++)
+			d->indirect_grefs[i] = s->indirect_grefs[i];
+		return;
+	}
 	dst->nr_segments = src->nr_segments;
 	dst->handle = src->handle;
 	dst->id = src->id;
@@ -107,6 +143,21 @@ static inline void blkif_get_x86_64_req(blkif_request_t *dst, blkif_x86_64_reque
 	int i, n = BLKIF_MAX_SEGMENTS_PER_REQUEST;
 
 	dst->operation = src->operation;
+	/* The layout of the request depends on its operation: read it once */
+	asm volatile ("" ::: "memory");
+	if (dst->operation == BLKIF_OP_INDIRECT) {
+		blkif_x86_64_request_indirect_t *s = (void *)src;
+		blkif_request_indirect_t *d = (void *)dst;
+
+		d->indirect_op = s->indirect_op;
+		d->nr_segments = s->nr_segments;
+		d->id = s->id;
+		d->sector_number = s->sector_number;
+		d->handle = s->handle;
+		for (i = 0; i < BLKIF_MAX_INDIRECT_PAGES_PER_REQUEST; i++)
+			d->indirect_grefs[i] = s->indirect_grefs[i];
+		return;
+	}
 	dst->nr_segments = src->nr_segments;
 	dst->handle = src->handle;
 	dst->id = src->id;

@@ -65,21 +65,6 @@ tapdisk_xenio_shared_ctx_close(struct td_xenio_shared_ctx * const ctx)
     free(ctx);
 }
 
-#define blkif_get_req(dst, src)                 \
-{                                               \
-    int i, n = BLKIF_MAX_SEGMENTS_PER_REQUEST;  \
-    dst->operation = src->operation;            \
-    dst->nr_segments = src->nr_segments;        \
-    dst->handle = src->handle;                  \
-    dst->id = src->id;                          \
-    dst->sector_number = src->sector_number;    \
-    xen_rmb();                                  \
-    if (n > dst->nr_segments)                   \
-        n = dst->nr_segments;                   \
-    for (i = 0; i < n; i++)                     \
-        dst->seg[i] = src->seg[i];              \
-}
-
 /**
  * Utility function that retrieves a request using @idx as the ring index,
  * copying it to the @dst in a H/W independent way.
@@ -112,7 +97,7 @@ xenio_blkif_get_request(struct td_blkif_queue * const queue,
             {
                 blkif_x86_32_request_t *src;
                 src = RING_GET_REQUEST(&rings->x86_32, idx);
-                blkif_get_req(dst, src);
+                blkif_get_x86_32_req(dst, src);
                 break;
             }
 
@@ -120,7 +105,7 @@ xenio_blkif_get_request(struct td_blkif_queue * const queue,
             {
                 blkif_x86_64_request_t *src;
                 src = RING_GET_REQUEST(&rings->x86_64, idx);
-                blkif_get_req(dst, src);
+                blkif_get_x86_64_req(dst, src);
                 break;
             }
 

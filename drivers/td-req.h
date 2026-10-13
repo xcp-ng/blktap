@@ -28,12 +28,19 @@
 #include "td-blkif.h"
 
 /*
- * A ring request descriptor (blkif_request_t) carries at most
- * BLKIF_MAX_SEGMENTS_PER_REQUEST segments, each mapping a single page, so the
- * per-request data buffer and the vectorised segment arrays below only ever
- * need that many entries. (This backend does not implement BLKIF_OP_INDIRECT,
- * which is the only mechanism that would raise the per-request segment count.)
+ * A direct request (blkif_request_t) carries at most
+ * BLKIF_MAX_SEGMENTS_PER_REQUEST segments, each mapping a single page. An
+ * indirect request (BLKIF_OP_INDIRECT) carries the grant references of pages
+ * holding up to the number of segments the back-end announced in
+ * feature-max-indirect-segments, at most TD_MAX_INDIRECT_SEGMENTS.
  */
+#define TD_MAX_INDIRECT_SEGMENTS 256
+#define TD_INDIRECT_SEGMENTS_PER_PAGE (PAGE_SIZE / sizeof(struct blkif_request_segment))
+#define TD_MAX_SEGMENTS_PER_REQUEST \
+	(TD_MAX_INDIRECT_SEGMENTS > BLKIF_MAX_SEGMENTS_PER_REQUEST ? \
+	 TD_MAX_INDIRECT_SEGMENTS : BLKIF_MAX_SEGMENTS_PER_REQUEST)
+
+/* The data buffer of a direct request */
 #define TD_REQ_BUFFER_SIZE (BLKIF_MAX_SEGMENTS_PER_REQUEST << PAGE_SHIFT)
 
 /**
@@ -52,7 +59,20 @@ struct td_xenblkif_req {
      * only copy the descriptor and not the actual data, the guest is free
      * to modify the data and corrupt itself if it wants to.
      */
-    blkif_request_t msg;
+    union {
+        blkif_request_t msg;
+        blkif_request_indirect_t ind;
+    };
+
+    /*
+     * The operation and the segments of the request, direct or indirect: the
+     * data operation of an indirect request, and its segments, copied from
+     * the indirect pages to indirect_segs. The other fields (id,
+     * sector_number) are at the same place in both kinds of request.
+     */
+    uint8_t op;
+    unsigned int nr_segs;
+    struct blkif_request_segment *segs;
 
     /*
      * Queue number the request is originating from.
@@ -75,12 +95,14 @@ struct td_xenblkif_req {
     /**
      * The scatter/gather list td_vbd_request_t.iov points to.
      */
-    struct td_iovec iov[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+    struct td_iovec iov[TD_MAX_SEGMENTS_PER_REQUEST];
 
     int prot;
 
 	struct gntdev_grant_copy_segment
-		gcopy_segs[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+		gcopy_segs[TD_MAX_SEGMENTS_PER_REQUEST];
+
+    struct blkif_request_segment indirect_segs[TD_MAX_INDIRECT_SEGMENTS];
 };
 
 struct td_blkif_queue;

@@ -222,6 +222,13 @@ struct td_xenblkif {
 
 	int poll_duration; /* microseconds; 0 means no polling. */
 	int poll_idle_threshold;
+
+	/*
+	 * Maximum number of segments of an indirect request, as announced to
+	 * the front-end in feature-max-indirect-segments. 0 = no indirect
+	 * requests.
+	 */
+	unsigned int indirect_max_segments;
 };
 
 #define RING_DEBUG(blkif, fmt, args...)                                     \

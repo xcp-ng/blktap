@@ -597,6 +597,14 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t grefs[][MAX
     td_blkif->poll_idle_threshold = poll_idle_threshold;
     td_blkif->nr_queues = nr_queues;
 
+    if (indirect_max_segments > TD_MAX_INDIRECT_SEGMENTS) {
+        RING_ERR(td_blkif, "too many indirect segments (%u), max %u\n",
+                 indirect_max_segments, TD_MAX_INDIRECT_SEGMENTS);
+        err = -EINVAL;
+        goto fail;
+    }
+    td_blkif->indirect_max_segments = indirect_max_segments;
+
     td_blkif->xenvbd_stats.root = NULL;
     shm_init(&td_blkif->xenvbd_stats.io_ring);
     shm_init(&td_blkif->xenvbd_stats.stats);

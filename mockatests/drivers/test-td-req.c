@@ -243,10 +243,11 @@ test_reject_inverted_sectors(void **state)
 
 /*
  * Regression guard for the sizing that made the above bounds meaningful: the
- * validation bound, the per-request buffer and the vectorised arrays must all
- * be able to hold exactly the ring descriptor's seg[] capacity. Historically
- * they diverged (arrays sized 32 while seg[] holds 11), which is what allowed
- * the out-of-bounds accesses.
+ * validation bound and the per-request buffer must match the ring descriptor's
+ * seg[] capacity, and the vectorised arrays must be able to hold at least that
+ * many segments (they are larger, to fit indirect requests). Historically they
+ * diverged (arrays sized 32 while seg[] holds 11), which is what allowed the
+ * out-of-bounds accesses.
  */
 static void
 test_segment_arrays_match_ring_capacity(void **state)
@@ -254,8 +255,8 @@ test_segment_arrays_match_ring_capacity(void **state)
 	struct td_xenblkif_req req;
 
 	assert_int_equal(ARRAY_SIZE(req.msg.seg), BLKIF_MAX_SEGMENTS_PER_REQUEST);
-	assert_int_equal(ARRAY_SIZE(req.gcopy_segs), ARRAY_SIZE(req.msg.seg));
-	assert_int_equal(ARRAY_SIZE(req.iov), ARRAY_SIZE(req.msg.seg));
+	assert_true(ARRAY_SIZE(req.gcopy_segs) >= ARRAY_SIZE(req.msg.seg));
+	assert_true(ARRAY_SIZE(req.iov) >= ARRAY_SIZE(req.msg.seg));
 	assert_int_equal((size_t)TD_REQ_BUFFER_SIZE,
 			(size_t)ARRAY_SIZE(req.msg.seg) << PAGE_SHIFT);
 }
