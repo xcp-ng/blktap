@@ -1062,7 +1062,9 @@ tapdisk_nbdserver_handshake_cb(event_id_t id, char mode, void *data)
 	/* Receive newstyle options. */
 	if (receive_newstyle_options(client, server->handshake_fd, no_zeroes) == -1) {
 		INFO("Option negotiation terminated");
+		/* The client aborted or failed the negotiation: do not enable it */
 		close(server->handshake_fd);
+		goto out;
 	}
 
 	INFO("About to enable client on fd %d", client->client_fd);
