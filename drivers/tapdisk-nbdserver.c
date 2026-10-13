@@ -1044,8 +1044,6 @@ void
 tapdisk_nbdserver_handshake_cb(event_id_t id, char mode, void *data)
 {
 	uint32_t cflags = 0;
-	int tmp_fd;
-
 	td_nbdserver_client_t *client = (td_nbdserver_client_t*)data;
 	td_nbdserver_t *server = client->server;
 
@@ -1055,7 +1053,7 @@ tapdisk_nbdserver_handshake_cb(event_id_t id, char mode, void *data)
 	if(rc < 0) {
 		ERR("Could not receive client flags");
 		close(server->handshake_fd);
-		return;
+		goto fail;
 	}
 
 	cflags = be32toh (cflags);
@@ -1066,18 +1064,22 @@ tapdisk_nbdserver_handshake_cb(event_id_t id, char mode, void *data)
 		INFO("Option negotiation terminated");
 		/* The client aborted or failed the negotiation: do not enable it */
 		close(server->handshake_fd);
-		return;
+		goto fail;
 	}
 
 	INFO("About to enable client on fd %d", client->client_fd);
 	if (tapdisk_nbdserver_enable_client(client) < 0) {
 		ERR("Error enabling client");
-		tmp_fd = client->client_fd;
-		pthread_mutex_lock(&server->mutex);
-		tapdisk_nbdserver_free_client(client);
-		pthread_mutex_unlock(&server->mutex);
-		close(tmp_fd);
+		close(client->client_fd);
+		goto fail;
 	}
+
+	return;
+
+fail:
+	pthread_mutex_lock(&server->mutex);
+	tapdisk_nbdserver_free_client(client);
+	pthread_mutex_unlock(&server->mutex);
 }
 
 int
