@@ -44,7 +44,8 @@ int
 tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int devid,
 		int poll_duration, int poll_idle_threshold,
 		const grant_ref_t grefs[][8], const int order, const int queues,
-		const evtchn_port_t* ports, int proto, const char *pool_name, const int minor)
+		const evtchn_port_t* ports, int proto, const char *pool_name,
+		const unsigned int indirect_max_segments, const int minor)
 {
     tapdisk_message_t message;
     int i, q, err;
@@ -67,7 +68,7 @@ tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int devid,
     message.u.blkif.order = order;
     message.u.blkif.proto = proto;
     message.u.blkif.persistent_grants = false;
-    message.u.blkif.indirect_max_segments = 0;
+    message.u.blkif.indirect_max_segments = indirect_max_segments;
     message.u.blkif.poll_duration = poll_duration;
     message.u.blkif.poll_idle_threshold = poll_idle_threshold;
     if (pool_name) {

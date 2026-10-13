@@ -98,6 +98,14 @@ int pretty_time(char *buf, unsigned char buf_len);
 #define PHYS_DEV_KEY		"physical-device"
 #define PHYS_DEV_PATH_KEY	"physical-device-path"
 #define HOTPLUG_STATUS_KEY	"hotplug-status"
+
+/*
+ * Indirect segments announced by default: what Linux front-ends use by
+ * default (xen_blkif_max_segments), and the maximum tapdisk supports
+ * (TD_MAX_INDIRECT_SEGMENTS).
+ */
+#define TAPBACK_INDIRECT_SEGMENTS	32
+#define TAPBACK_MAX_INDIRECT_SEGMENTS	256
 #define MODE_KEY		"mode"
 #define POLLING_DURATION	"polling-duration"
 #define POLLING_IDLE_THRESHOLD	"polling-idle-threshold"
@@ -209,6 +217,12 @@ typedef struct backend {
      * Tells whether we support discard.
      */
     bool discard;
+
+    /**
+     * Maximum number of segments of an indirect request announced to the
+     * front-ends, 0 for no indirect requests.
+     */
+    unsigned int indirect_segments;
 } backend_t;
 
 /**
