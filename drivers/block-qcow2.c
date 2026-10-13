@@ -264,14 +264,10 @@ static void qcow2_handle_requests(struct qcow2_queue *q)
 		    do_aio_write(q->state, req);
 		    break;
 		case QCOW2_OP_COMMIT:
-		    do_commit(q->state, req);
-		    break;
 		case QCOW2_OP_QUERY:
-		    do_query_commit_job(q->state, req);
-		    break;
 		case QCOW2_OP_CANCEL_COMMIT:
-		    do_cancel_commit_job(q->state, req);
-		    break;
+		    /* Run in the main AioContext, see qcow2_job_bh(). */
+		    abort();
 		}
 		if (inflight_atstart > IO_PLUG_THRESHOLD) {
 		    if (batched >= inflight_atstart) {
@@ -296,6 +292,40 @@ static void block_bh(void *opaque)
 	struct qcow2_queue *q = opaque;
 
 	qcow2_handle_requests(q);
+}
+
+/*
+ * The commit job requests use the QEMU job API, which must run in the main
+ * thread, holding the BQL: the td-qcow2 thread running the main AioContext,
+ * not the IOThread of a queue.
+ */
+static void qcow2_job_bh(void *opaque)
+{
+	struct qcow2_request *req = opaque;
+	struct qcow2_state *s = req->queue->state;
+
+	switch (req->op) {
+	case QCOW2_OP_COMMIT:
+		do_commit(s, req);
+		break;
+	case QCOW2_OP_QUERY:
+		do_query_commit_job(s, req);
+		break;
+	case QCOW2_OP_CANCEL_COMMIT:
+		do_cancel_commit_job(s, req);
+		break;
+	default:
+		abort();
+	}
+}
+
+/* Runs a commit job request and waits for it, returns with commit_lock held. */
+static void qcow2_run_job_request(struct qcow2_state *s, struct qcow2_request *req)
+{
+	pthread_mutex_lock(&s->commit_lock);
+	aio_bh_schedule_oneshot(qemu_get_aio_context(), qcow2_job_bh, req);
+	while (!req->done)
+		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
 }
 
 static void qcow2_iothread_destroy(struct qcow2_iothread *iothread,
@@ -1195,7 +1225,7 @@ int
 qcow2_commit(td_driver_t *driver, const char *name)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
-	struct qcow2_queue *q = &s->queue[0];  // TODO: always that one ?
+	struct qcow2_queue *q = &s->queue[0];  /* for its free requests */
 	struct qcow2_request *req;
 	int err;
 
@@ -1212,15 +1242,7 @@ qcow2_commit(td_driver_t *driver, const char *name)
 	req->op    = QCOW2_OP_COMMIT;
 	req->done  = false;
 
-	pthread_mutex_lock(&q->lock);
-	QSIMPLEQ_INSERT_TAIL(&q->inflight, req, list);
-	pthread_mutex_unlock(&q->lock);
-
-	pthread_mutex_lock(&s->commit_lock);
-	if (!req->done) {
-		qemu_bh_schedule(q->bh);
-		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
-	}
+	qcow2_run_job_request(s, req);
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
@@ -1284,7 +1306,7 @@ int
 qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
-	struct qcow2_queue *q = &s->queue[0];  // TODO: always that one ?
+	struct qcow2_queue *q = &s->queue[0];  /* for its free requests */
 	struct qcow2_request *req;
 	int err;
 
@@ -1297,15 +1319,7 @@ qcow2_query_commit_job(td_driver_t *driver, td_query_t *query)
 	req->op    = QCOW2_OP_QUERY;
 	req->done  = false;
 
-	pthread_mutex_lock(&q->lock);
-	QSIMPLEQ_INSERT_TAIL(&q->inflight, req, list);
-	pthread_mutex_unlock(&q->lock);
-
-	pthread_mutex_lock(&s->commit_lock);
-	if (!req->done) {
-		qemu_bh_schedule(q->bh);
-		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
-	}
+	qcow2_run_job_request(s, req);
 
 	if (query) {
 		query->status = JobStatus_str(s->job_info.status);
@@ -1384,7 +1398,7 @@ int
 qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
-	struct qcow2_queue *q = &s->queue[0];  // TODO: always that one ?
+	struct qcow2_queue *q = &s->queue[0];  /* for its free requests */
 	struct qcow2_request *req;
 	int err;
 
@@ -1398,15 +1412,7 @@ qcow2_cancel_commit_job(td_driver_t *driver, bool wait)
 	req->sync = wait;
 	req->done = false;
 
-	pthread_mutex_lock(&q->lock);
-	QSIMPLEQ_INSERT_TAIL(&q->inflight, req, list);
-	pthread_mutex_unlock(&q->lock);
-
-	pthread_mutex_lock(&s->commit_lock);
-	if (!req->done) {
-		qemu_bh_schedule(q->bh);
-		pthread_cond_wait(&s->commit_cond, &s->commit_lock);
-	}
+	qcow2_run_job_request(s, req);
 	err = req->error;
 	pthread_mutex_unlock(&s->commit_lock);
 
