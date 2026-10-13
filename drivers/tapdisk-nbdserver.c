@@ -1046,13 +1046,12 @@ tapdisk_nbdserver_handshake_cb(event_id_t id, char mode, void *data)
 	uint32_t cflags = 0;
 	td_nbdserver_client_t *client = (td_nbdserver_client_t*)data;
 	td_nbdserver_t *server = client->server;
+	int fd = client->client_fd;
 
 	tapdisk_server_unregister_event(id);
 
-	int rc = recv_fully_or_fail(server->handshake_fd, &cflags, sizeof(cflags));
-	if(rc < 0) {
+	if (recv_fully_or_fail(fd, &cflags, sizeof(cflags)) < 0) {
 		ERR("Could not receive client flags");
-		close(server->handshake_fd);
 		goto fail;
 	}
 
@@ -1060,17 +1059,15 @@ tapdisk_nbdserver_handshake_cb(event_id_t id, char mode, void *data)
 	bool no_zeroes = (NBD_FLAG_NO_ZEROES & cflags) != 0;
 
 	/* Receive newstyle options. */
-	if (receive_newstyle_options(client, server->handshake_fd, no_zeroes) == -1) {
+	if (receive_newstyle_options(client, fd, no_zeroes) == -1) {
 		INFO("Option negotiation terminated");
 		/* The client aborted or failed the negotiation: do not enable it */
-		close(server->handshake_fd);
 		goto fail;
 	}
 
-	INFO("About to enable client on fd %d", client->client_fd);
+	INFO("About to enable client on fd %d", fd);
 	if (tapdisk_nbdserver_enable_client(client) < 0) {
 		ERR("Error enabling client");
-		close(client->client_fd);
 		goto fail;
 	}
 
@@ -1080,12 +1077,12 @@ fail:
 	pthread_mutex_lock(&server->mutex);
 	tapdisk_nbdserver_free_client(client);
 	pthread_mutex_unlock(&server->mutex);
+	close(fd);
 }
 
 int
 tapdisk_nbdserver_new_protocol_handshake(td_nbdserver_client_t *client, int new_fd)
 {
-	td_nbdserver_t *server = client->server;
 	struct nbd_new_handshake handshake;
 
 	handshake.nbdmagic = htobe64 (NBD_MAGIC);
@@ -1097,7 +1094,6 @@ tapdisk_nbdserver_new_protocol_handshake(td_nbdserver_client_t *client, int new_
 		ERR("Sending newstyle handshake");
 		return -1;
 	}
-	server->handshake_fd = new_fd;
 	/* We may need to wait upto 40 seconds for a reply especially during
 	 * SXM contexts, so setup an event and return so that tapdisk is 
 	 * reponsive during the interim*/
