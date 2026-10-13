@@ -1582,11 +1582,14 @@ __tapdisk_vbd_complete_td_request(td_vbd_queue_t* queue, td_vbd_request_t *vreq,
 	 * completed by the NBD client on the main thread), wake it up:
 	 * otherwise the response waits until something else wakes it up, which
 	 * may never happen if the guest stopped sending requests (e.g. while
-	 * suspending for a live migration).
+	 * suspending for a live migration). Threaded drivers (qcow2) return the
+	 * responses themselves with tapdisk_vbd_kick(), which wakes the IO
+	 * thread after: waking it here too makes it race with the driver thread
+	 * for queue->mutex and doubles the wake-ups.
 	 */
-	if (notify && !tapdisk_server_in_io_thread(queue - vbd->queues))
+	if (notify && !tapdisk_server_in_io_thread(queue - vbd->queues) &&
+	    !(image->driver && td_flag_test(image->driver->ops->flags, TD_DRIVER_THREADED)))
 		tapdisk_vbd_wake_queue(queue);
-
 	if (err != -EBUSY) {
 		int write = treq.op == TD_OP_WRITE;
 		// FIXME: should we take a lock here for stats ? or use an atomic ?
@@ -1788,6 +1791,8 @@ tapdisk_vbd_complete_block_status_request(td_request_t treq, int res)
 	return __tapdisk_vbd_complete_td_request(queue, vreq, treq, res);
 }
 
+/* Called by td_complete_request(), either from IO thread or another thread
+ * like with QCOW2 */
 static int
 tapdisk_vbd_complete_td_request_cb(td_request_t treq, int res)
 {
