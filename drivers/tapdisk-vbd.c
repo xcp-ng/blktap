@@ -2083,6 +2083,14 @@ tapdisk_vbd_issue_new_requests(td_vbd_queue_t* queue)
 		pthread_mutex_lock(&queue->mutex);
 
 		/*
+		 * Count the request once it left the new requests, also when it
+		 * failed and will be retried from the failed requests (e.g. on
+		 * -EBUSY), which doesn't count it again. vreq must NOT be
+		 * accessed after issuing the request.
+		 */
+		td_sector_count_add(&queue->secs, secs, write);
+
+		/*
 		 * if this request failed, but was not completed,
 		 * we'll back off for a while.
 		 */
@@ -2090,10 +2098,6 @@ tapdisk_vbd_issue_new_requests(td_vbd_queue_t* queue)
 			pthread_mutex_unlock(&queue->mutex);
 			return err;
 		}
-
-		/* XXX: split counting and add; vreq must NOT be accessed after issuing the
-		        request. */
-		td_sector_count_add(&queue->secs, secs, write);
 	}
 	pthread_mutex_unlock(&queue->mutex);
 
