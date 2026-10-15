@@ -56,6 +56,16 @@ enum {
 	TAPDISK_NBD_CMD_BLOCK_STATUS
 };
 
+/*
+ * NBD command flags. These are carried in the flags field of struct
+ * nbd_request, alongside the command itself in the type field.
+ */
+#define NBD_CMD_FLAG_FUA       (1 << 0)
+#define NBD_CMD_FLAG_NO_HOLE   (1 << 1)
+#define NBD_CMD_FLAG_DF        (1 << 2)
+#define NBD_CMD_FLAG_REQ_ONE   (1 << 3)
+#define NBD_CMD_FLAG_FAST_ZERO (1 << 4)
+
 typedef enum nbd_protocol_style {
 	TAPDISK_NBD_PROTOCOL_OLD = 0,
 	TAPDISK_NBD_PROTOCOL_NEW
@@ -63,7 +73,8 @@ typedef enum nbd_protocol_style {
 
 struct nbd_request {
 	uint32_t magic;
-	uint32_t type;	
+	uint16_t flags;
+	uint16_t type;
 	char handle[8];
 	uint64_t from;
 	uint32_t len;
