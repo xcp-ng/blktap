@@ -121,7 +121,7 @@ td_xenblkif_bufcache_free(struct td_xenblkif * const blkif)
 
     while (blkif->n_reqs_bufcache_free > TD_REQS_BUFCACHE_MIN){
         munmap(blkif->reqs_bufcache[--blkif->n_reqs_bufcache_free],
-               (size_t)BLKIF_MAX_BUFFER_SEGMENTS_PER_REQUEST << PAGE_SHIFT);
+               (size_t)TD_REQ_BUFFER_SIZE);
     }
 }
 
@@ -644,8 +644,17 @@ tapdisk_xenblkif_parse_request(struct td_xenblkif * const blkif,
         /*
          * Note that first and last may be equal, which means only one sector
          * must be transferred.
+         *
+         * first_sect/last_sect are guest-controlled 8-bit values, but each
+         * segment addresses at most a single page. Reject any segment whose
+         * sectors fall outside the page: an out-of-range last_sect would
+         * produce an oversized transfer length (which also overflows the
+         * uint16_t gntdev grant-copy length) and drive out-of-bounds accesses
+         * to the per-request buffer.
          */
-        if (seg->last_sect < seg->first_sect) {
+        if (seg->last_sect < seg->first_sect ||
+	    seg->last_sect >= (PAGE_SIZE >> SECTOR_SHIFT))
+	{
             RING_ERR(blkif, "req %lu: invalid sectors %d-%d\n",
                     req->msg.id, seg->first_sect, seg->last_sect);
             err = EINVAL;
@@ -670,7 +679,7 @@ tapdisk_xenblkif_parse_request(struct td_xenblkif * const blkif,
         struct blkif_request_segment *seg = &req->msg.seg[i];
         size_t size;
 
-        /* TODO check that first_sect/last_sect are within page */
+        /* first_sect/last_sect are already validated, above */
 
         next = page + (seg->first_sect << SECTOR_SHIFT);
         size = seg->last_sect - seg->first_sect + 1;
@@ -789,11 +798,14 @@ tapdisk_xenblkif_make_vbd_request(struct td_xenblkif * const blkif,
     gettimeofday(&tapreq->ts, NULL);
 
     /*
-     * Check that the number of segments is sane.
+     * Check that the number of segments is sane. nr_segments is guest-
+     * controlled; the blkif protocol permits at most
+     * BLKIF_MAX_SEGMENTS_PER_REQUEST segments per request, which is how the
+     * ring descriptor and our per-request buffers are sized.
      */
     if (unlikely((tapreq->msg.nr_segments == 0 &&
                 tapreq->msg.operation != BLKIF_OP_WRITE_BARRIER) ||
-            tapreq->msg.nr_segments > BLKIF_MAX_BUFFER_SEGMENTS_PER_REQUEST)) {
+            tapreq->msg.nr_segments > BLKIF_MAX_SEGMENTS_PER_REQUEST)) {
         RING_ERR(blkif, "req %lu: bad number of segments in request (%d)\n",
                 tapreq->msg.id, tapreq->msg.nr_segments);
         err = EINVAL;
