@@ -188,10 +188,12 @@ int tap_ctl_disconnect_xenblkif(const pid_t pid, const domid_t domid,
  * @param sector_size output parameter that receives the size of the sector
  * @param info TODO ?
  * @param minor
+ * @param enable_flush_cache optional output parameter for flush cache flag (can be NULL)
  *
  */
 int tap_ctl_info(pid_t pid, unsigned long long *sectors, unsigned int
-		*sector_size, unsigned int *info, const int minor);
+		*sector_size, unsigned int *info, const int minor,
+		unsigned int *enable_flush_cache);
 
 /**
  * Parses a type:/path/to/file string, storing the type and path to the output

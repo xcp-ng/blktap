@@ -297,6 +297,12 @@ typedef struct vbd {
 	bool cdrom;
 
 	/**
+	 * Enable advertising feature-flush-cache to the guest.
+	 * Set via TAPDISK_MESSAGE_FLAG_ENABLE_FLUSH_CACHE.
+	 */
+	unsigned int enable_flush_cache;
+
+	/**
 	 * Polling duration in microseconds. 0 means no polling.
 	 */
 	int polling_duration;

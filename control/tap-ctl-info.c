@@ -36,7 +36,8 @@
 #include "tap-ctl.h"
 
 int tap_ctl_info(pid_t pid, unsigned long long *sectors,
-		unsigned int *sector_size, unsigned int *info, const int minor)
+		unsigned int *sector_size, unsigned int *info, const int minor,
+		unsigned int *enable_flush_cache)
 {
     tapdisk_message_t message;
     int err;
@@ -59,7 +60,10 @@ int tap_ctl_info(pid_t pid, unsigned long long *sectors,
     if (TAPDISK_MESSAGE_DISK_INFO_RSP == message.type) {
         *sectors = message.u.image.sectors;
         *sector_size = message.u.image.sector_size;
-        *info = message.u.image.info;
+        if (enable_flush_cache)
+            *enable_flush_cache = !!(message.u.image.info &
+                                     TAPDISK_IMAGE_INFO_ENABLE_FLUSH_CACHE);
+        *info = message.u.image.info & ~TAPDISK_IMAGE_INFO_ENABLE_FLUSH_CACHE;
         return 0;
     } else if (TAPDISK_MESSAGE_ERROR == message.type) {
        return -message.u.response.error;
