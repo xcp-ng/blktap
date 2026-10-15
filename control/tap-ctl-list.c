@@ -38,10 +38,14 @@
 #include <unistd.h>
 #include <string.h>
 #include <glob.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 #include "tap-ctl.h"
 #include "blktap.h"
 #include "list.h"
+
+#define PROC_LOCKS "/proc/locks"
 
 static tap_list_t*
 _tap_list_alloc(void)
@@ -407,6 +411,148 @@ tap_ctl_list_pid(pid_t pid, struct list_head *list)
 		list_add_tail(&t->entry, list);
 
 	return 0;
+}
+
+/**
+ * Finds the pid of the process holding a BSD (flock) lock on the file
+ * identified by (dev, ino), by scanning /proc/locks a line at a time. tapdisk
+ * holds such a lock on a minor's marker file for exactly as long as it serves
+ * that minor, so this maps a minor to its owning tapdisk without contacting any
+ * tapdisk.
+ *
+ * Note: flock() locks are only visible via /proc/locks (fcntl(F_GETLK) cannot
+ * see them, as they are a separate lock space).
+ *
+ * @returns the holder pid (> 0); 0 if a matching lock exists but its holder is
+ * not visible in this pid namespace; -1 if no matching lock is held or
+ * /proc/locks could not be read.
+ */
+static pid_t
+_tap_ctl_marker_holder(dev_t dev, ino_t ino)
+{
+	FILE *fp;
+	char line[256];
+	unsigned int target_major = major(dev);
+	unsigned int target_minor = minor(dev);
+	pid_t pid = -1;
+
+	fp = fopen(PROC_LOCKS, "r");
+	if (!fp)
+		return -1;
+
+	/*
+	 * Each line looks like:
+	 *   2: FLOCK  ADVISORY  WRITE 18210 00:45:230 0 EOF
+	 * i.e. "<id>: <type> <mode> <rw> <pid> <major>:<minor>:<inode> ...",
+	 * with major/minor in hex and inode in decimal. Blocked waiters are
+	 * printed as "<id>: -> <type> ..." and are skipped by the FLOCK check.
+	 * Lines are short and bounded, so a fixed line buffer is sufficient.
+	 */
+	while (fgets(line, sizeof(line), fp)) {
+		char *tok, *savetok, *pidtok, *devtok;
+		unsigned int maj, min;
+		unsigned long lino;
+
+		tok = strtok_r(line, " \t", &savetok);		/* "<id>:" */
+		if (!tok)
+			continue;
+
+		tok = strtok_r(NULL, " \t", &savetok);		/* type / "->" */
+		if (!tok || strcmp(tok, "FLOCK"))
+			continue;
+
+		strtok_r(NULL, " \t", &savetok);		/* ADVISORY/... */
+		strtok_r(NULL, " \t", &savetok);		/* READ/WRITE */
+		pidtok = strtok_r(NULL, " \t", &savetok);	/* pid */
+		devtok = strtok_r(NULL, " \t", &savetok);	/* maj:min:ino */
+		if (!pidtok || !devtok)
+			continue;
+
+		if (sscanf(devtok, "%x:%x:%lu", &maj, &min, &lino) != 3)
+			continue;
+
+		if (maj == target_major && min == target_minor &&
+		    lino == (unsigned long)ino) {
+			pid = (pid_t)atoi(pidtok);
+			break;
+		}
+	}
+
+	fclose(fp);
+
+	return pid;
+}
+
+/**
+ * Lists the single VBD attached to a given minor, without enumerating every
+ * tapdisk. The owning tapdisk is located directly from the flock it holds on
+ * the minor's marker file (see _tap_ctl_marker_holder), so the cost is one stat
+ * + one read of /proc/locks + one control-socket round-trip, independent of the
+ * number of running tapdisks.
+ *
+ * The result is identical to tap_ctl_list() filtered to \p minor. On any
+ * unexpected condition (marker present but holder unreachable, stale marker,
+ * /proc/locks unreadable) it falls back to the full tap_ctl_list() scan so the
+ * outcome is always the same as the slow path.
+ */
+int
+tap_ctl_list_minor(int minor, struct list_head *list)
+{
+	struct list_head vbds = LIST_HEAD_INIT(vbds);
+	tap_list_t *v, *next_v, *found = NULL;
+	struct stat st;
+	char *path = NULL;
+	pid_t pid;
+	int err;
+
+	INIT_LIST_HEAD(list);
+
+	err = asprintf(&path, "%s/tapdisk-%d", BLKTAP2_NP_RUN_DIR, minor);
+	if (err == -1)
+		return -errno;
+
+	err = stat(path, &st);
+	free(path);
+	if (err) {
+		if (errno == ENOENT)
+			return 0;	/* minor not allocated: empty list */
+		goto fallback;
+	}
+
+	pid = _tap_ctl_marker_holder(st.st_dev, st.st_ino);
+	if (pid < 0) {
+		/* Marker exists but nobody serves it: orphan minor. */
+		tap_list_t *tl = _tap_list_alloc();
+		if (!tl)
+			return -ENOMEM;
+		tl->minor = minor;
+		list_add_tail(&tl->entry, list);
+		return 0;
+	}
+	if (pid == 0)
+		goto fallback;		/* served, but holder not visible to us */
+
+	err = _tap_ctl_list_tapdisk(pid, &vbds);
+	if (err)
+		goto fallback;		/* holder went away / IPC error */
+
+	tap_list_for_each_entry_safe(v, next_v, &vbds) {
+		if (!found && v->minor == minor) {
+			list_move_tail(&v->entry, list);
+			found = v;
+		} else
+			_tap_list_free(v);
+	}
+
+	if (!found)
+		goto fallback;		/* stale marker: minor not served here */
+
+	return 0;
+
+fallback:
+	tap_ctl_list_free(&vbds);
+	tap_ctl_list_free(list);
+	return tap_ctl_list(list);
 }
 
 int

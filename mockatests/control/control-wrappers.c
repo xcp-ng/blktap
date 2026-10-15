@@ -321,16 +321,17 @@ __wrap_globfree(glob_t *pglob)
 int
 __wrap_stat(const char *pathname, struct stat *statbuf)
 {
+	struct stat *src;
+
 	check_expected(pathname);
 	int result = mock();
-	printf("__wrap_stat result = %d\n", result);
 	if (result == -1) {
-		printf("__wrap_stat, in error path\n");
-
 		errno = mock();
 		return result;
 	}
-	statbuf = mock_ptr_type(struct stat *);
+	src = mock_ptr_type(struct stat *);
+	if (src)
+		memcpy(statbuf, src, sizeof(*statbuf));
 	return result;
 }
 
