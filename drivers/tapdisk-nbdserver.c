@@ -87,12 +87,6 @@ uint16_t gflags = (NBD_FLAG_FIXED_NEWSTYLE | NBD_FLAG_NO_ZEROES);
 		BUG();						\
 	}
 
-struct td_nbdserver_req {
-	td_vbd_request_t        vreq;
-	char                    id[16];
-	struct td_iovec         iov;
-};
-
 int recv_fully_or_fail(int f, void *buf, size_t len) {
 	ssize_t res;
 	int err = 0;
@@ -177,7 +171,8 @@ convert_extents_to_block_descriptors (struct tapdisk_extents *extents)
 }
 
 static int
-send_structured_reply_block_status (int fd, char* id, struct tapdisk_extents *extents)
+send_structured_reply_block_status (int fd, char* id, struct tapdisk_extents *extents,
+				    bool req_one)
 {
 	struct nbd_structured_reply reply;
 	struct nbd_block_descriptor *blocks;
@@ -185,12 +180,19 @@ send_structured_reply_block_status (int fd, char* id, struct tapdisk_extents *ex
 	uint32_t context_id;
 	int ret = 0;
 
+	/*
+	 * When the client set NBD_CMD_FLAG_REQ_ONE it only wants the first
+	 * extent; the remaining descriptors must not be sent.
+	 */
+	if (req_one && nr_blocks > 1)
+		nr_blocks = 1;
+
 	blocks = convert_extents_to_block_descriptors (extents);
 	if(blocks == NULL) {
 		ERR("Could not allocate blocks for extents");
 		ret = -1;
 		goto done;
-	}	
+	}
 
 	reply.magic = htobe32 (NBD_STRUCTURED_REPLY_MAGIC);
 	memcpy(&reply.handle, id, sizeof(reply.handle));
@@ -220,11 +222,49 @@ send_structured_reply_block_status (int fd, char* id, struct tapdisk_extents *ex
 			ERR("Could not send extent block");
 			ret = -errno;
 			goto done;
-		}	
+		}
 	}
 done:
 	free(blocks);
-	return ret;   
+	return ret;
+}
+
+/*
+ * Send a structured error reply. Used when a block status request could not be
+ * satisfied, so that we never emit a (malformed) block status reply with zero
+ * extents, which strict clients treat as a protocol error and disconnect on.
+ */
+static int
+send_structured_reply_error (int fd, char *id, uint32_t error)
+{
+	struct nbd_structured_reply reply;
+	struct {
+		uint32_t error;
+		uint16_t msg_len;
+	} __attribute__((packed)) payload;
+	int rc;
+
+	reply.magic = htobe32 (NBD_STRUCTURED_REPLY_MAGIC);
+	memcpy (&reply.handle, id, sizeof(reply.handle));
+	reply.flags = htobe16 (NBD_REPLY_FLAG_DONE);
+	reply.type = htobe16 (NBD_REPLY_TYPE_ERROR);
+	reply.length = htobe32 (sizeof(payload));
+
+	rc = send_fully_or_fail (fd, &reply, sizeof(reply));
+	if (rc < 0) {
+		ERR("Could not send structured error reply header");
+		return -1;
+	}
+
+	payload.error = htobe32 (error);
+	payload.msg_len = htobe16 (0);
+	rc = send_fully_or_fail (fd, &payload, sizeof(payload));
+	if (rc < 0) {
+		ERR("Could not send structured error reply payload");
+		return -1;
+	}
+
+	return 0;
 }
 
 td_nbdserver_req_t *
@@ -872,7 +912,17 @@ __tapdisk_nbdserver_block_status_cb(td_vbd_request_t *vreq, int err,
 	td_nbdserver_client_t *client = token;
 	td_nbdserver_req_t *req = container_of(vreq, td_nbdserver_req_t, vreq);
 	tapdisk_extents_t* extents = (tapdisk_extents_t *)(vreq->data);
-	send_structured_reply_block_status (client->client_fd, req->id, extents);
+
+	if (err || extents->count == 0) {
+		ERR("Block status request failed (err %d, %zu extents)",
+		    err, extents->count);
+		send_structured_reply_error (client->client_fd, req->id,
+					     err ? (uint32_t)(err < 0 ? -err : err)
+						 : EINVAL);
+	} else {
+		send_structured_reply_block_status (client->client_fd, req->id,
+						    extents, req->req_one);
+	}
 	free_extents(extents);
 	tapdisk_nbd_server_free_vreq(client, vreq, true);
 }
@@ -1252,7 +1302,8 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 	}
 
 	request.from = ntohll(request.from);
-	request.type = ntohl(request.type);
+	request.flags = ntohs(request.flags);
+	request.type = ntohs(request.type);
 	len = ntohl(request.len);
 	if (((len & 0x1ff) != 0) || ((request.from & 0x1ff) != 0)) {
 		ERR("Non sector-aligned request (%"PRIu64", %d)",
@@ -1298,8 +1349,13 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 		return;
 	case TAPDISK_NBD_CMD_BLOCK_STATUS:
 	{
-		if (!client->structured_reply)
-			ERR("NBD_CMD_BLOCK_STATUS: when not in structured reply");
+		td_nbdserver_req_t *bs_req;
+
+		if (!client->structured_reply) {
+			ERR("NBD_CMD_BLOCK_STATUS received when not in "
+			    "structured reply mode");
+			goto fail;
+		}
 
 		if (len > 2 * MEGABYTES) {
 			/* limit request to 2MB */
@@ -1320,10 +1376,14 @@ tapdisk_nbdserver_clientcb(event_id_t id, char mode, void *data)
 		vreq->data = extents;
 		vreq->cb = __tapdisk_nbdserver_block_status_cb;
 		vreq->op = TD_OP_BLOCK_STATUS;
+
+		bs_req = container_of(vreq, td_nbdserver_req_t, vreq);
+		bs_req->req_one = (request.flags & NBD_CMD_FLAG_REQ_ONE) != 0;
 	}
 		break;
 	default:
-		ERR("Unsupported operation: 0x%x", request.type);
+		ERR("Unsupported operation: type 0x%x flags 0x%x",
+		    request.type, request.flags);
 		goto fail;
 	}
 

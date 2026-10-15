@@ -148,6 +148,8 @@ tap_cli_list(int argc, char **argv)
 
 	if (pid != -1)
 		err = tap_ctl_list_pid(pid, &list);
+	else if (minor >= 0)
+		err = tap_ctl_list_minor(minor, &list);
 	else
 		err = tap_ctl_list(&list);
 	if (err)

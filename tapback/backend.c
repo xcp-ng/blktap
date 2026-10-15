@@ -139,7 +139,7 @@ find_tapdisk(const int minor, tap_list_t *tap)
     tap_list_t *_tap;
     int err;
 
-    err = tap_ctl_list(&list);
+    err = tap_ctl_list_minor(minor, &list);
     if (err) {
         WARN(NULL, "error listing tapdisks: %s\n", strerror(-err));
         goto out;

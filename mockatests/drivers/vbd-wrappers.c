@@ -32,6 +32,9 @@
 #include <stddef.h>
 #include <setjmp.h>
 #include <cmocka.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 #include "tapdisk.h"
 #include "tapdisk-interface.h"
@@ -56,6 +59,19 @@ __wrap_send(int fd, void* buf, size_t size, int flags)
 	check_expected(size);
 	check_expected(flags);
 	return (int)mock();
+}
+
+/*
+ * Copies a caller-supplied buffer (passed via will_return) into buf and
+ * reports it as fully received, so a single call satisfies
+ * recv_fully_or_fail().
+ */
+ssize_t
+__wrap_recv(int sockfd, void *buf, size_t len, int flags)
+{
+	void *src = (void *)mock();
+	memcpy(buf, src, len);
+	return len;
 }
 
 event_id_t
