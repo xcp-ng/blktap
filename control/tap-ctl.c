@@ -732,7 +732,7 @@ tap_cli_open(int argc, char **argv)
 	encryption_key = NULL;
 
 	optind = 0;
-	while ((c = getopt(argc, argv, "a:RDm:p:e:r2:st:C:Eh")) != -1) {
+	while ((c = getopt(argc, argv, "a:RDm:p:e:r2:st:C:EFh")) != -1) {
 		switch (c) {
 		case 'p':
 			pid = atoi(optarg);
@@ -788,6 +788,9 @@ tap_cli_open(int argc, char **argv)
 				exit(1);
 			}
 			flags |= TAPDISK_MESSAGE_FLAG_OPEN_ENCRYPTED;
+			break;
+		case 'F':
+			flags |= TAPDISK_MESSAGE_FLAG_ENABLE_FLUSH_CACHE;
 			break;
 		case '?':
 			goto usage;

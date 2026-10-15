@@ -167,6 +167,12 @@ struct td_vbd_handle {
 	bool                       watchdog_warned;
 
 	int                        lock_fd;
+
+	/**
+	 * Enable advertising feature-flush-cache to the guest.
+	 * Set via TAPDISK_MESSAGE_FLAG_ENABLE_FLUSH_CACHE during open.
+	 */
+	int                        enable_flush_cache;
 };
 
 #define tapdisk_vbd_for_each_request(vreq, tmp, list)	                \
