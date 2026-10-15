@@ -119,6 +119,12 @@ connect_tap(vbd_t * const device)
                 "%d", &order))
         order = 0;
 
+    if (order < 0 || order > MAX_RING_PAGE_ORDER) {
+        WARN(device, "front-end asked for an invalid ring order: %d\n", order);
+        err = EINVAL;
+        goto out;
+    }
+
      nr_pages = 1 << order;
 
     if (!(gref = calloc(nr_pages, sizeof(grant_ref_t)))) {

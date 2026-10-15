@@ -45,6 +45,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "xen_blkif.h"
+#include "debug.h"
 #include "tap-ctl.h"
 #include "compiler.h"
 #include "util.h"
@@ -58,7 +60,9 @@ tap_ctl_connect_xenblkif(const pid_t pid, const domid_t domid, const int devid, 
     tapdisk_message_t message;
     int i, err;
 
-	memset(&message, 0, sizeof(message));
+    ASSERT(order >= 0 && order <= MAX_RING_PAGE_ORDER);
+
+    memset(&message, 0, sizeof(message));
     message.type = TAPDISK_MESSAGE_XENBLKIF_CONNECT;
     message.cookie = minor;
 

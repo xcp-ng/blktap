@@ -269,10 +269,11 @@ __lio_setup_aio_poll(libaio_queue *queue, int qlen)
 
 	lio->aio_ctx = REQUEST_ASYNC_FD;
 
+	/* io_setup() returns -errno, it does not set errno */
 	fd = io_setup(qlen, &lio->aio_ctx);
 	if (fd < 0) {
 		lio->aio_ctx = 0;
-		err = -errno;
+		err = fd;
 
 		if (err == -EINVAL)
 			goto fail_fd;
@@ -305,8 +306,16 @@ __lio_setup_aio_eventfd(libaio_queue *queue, int qlen)
 	}
 
 	lio->event_fd = eventfd(0, 0);
-	if (lio->event_fd < 0)
-		return  -errno;
+	if (lio->event_fd < 0) {
+		err = -errno;
+		/*
+		 * The caller falls back to the poll variant, which overwrites
+		 * aio_ctx. Release the context now or its handle is lost and
+		 * it can never be destroyed.
+		 */
+		libaio_backend_lio_destroy_aio(queue);
+		return err;
+	}
 
 	lio->flags |= LIO_FLAG_EVENTFD;
 
@@ -564,7 +573,14 @@ fail:
 static void
 libaio_backend_free_queue(tqueue *q)
 {
-	libaio_queue *queue = (libaio_queue*)*q;
+	libaio_queue *queue;
+
+	/* A queue whose setup failed, or which has already been freed, is
+	 * NULL. Both are reachable from tapdisk_server_close_aio(). */
+	if (!q || !*q)
+		return;
+
+	queue = (libaio_queue*)*q;
 	libaio_backend_queue_free_io(queue);
 
 	free(queue->iocbs);
