@@ -102,12 +102,10 @@ void test_tap_ctl_list_success_one_td_no_minor_no_path(void **state)
 	tap_list_t *entry;
 	struct list_head list = LIST_HEAD_INIT(list);
 
-	pid_t test_pid = 1236;
 	int ipc_socket = 7;
 	char *expected_sock_name = "/run/blktap-control/ctl1236";
 	tapdisk_message_t write_message;
 	tapdisk_message_t *read_message;
-	struct mock_ipc_params *pid_ipc_params;
 	struct mock_ipc_params *list_ipc_params;
 	char *glob_path = "/run/blktap-control/ctl1236";
 	char *glob_data;
@@ -123,21 +121,6 @@ void test_tap_ctl_list_success_one_td_no_minor_no_path(void **state)
 	will_return(__wrap_glob, 0);
 	will_return(__wrap_glob, 1);
 	will_return(__wrap_glob, pathv);
-
-	/* IPC PID */
-	memset(&write_message, 0, sizeof(write_message));
-	write_message.type = TAPDISK_MESSAGE_PID;
-
-	read_message = test_malloc(sizeof(*read_message));
-	memset(read_message, 0, sizeof(*read_message));
-	read_message->type = TAPDISK_MESSAGE_PID_RSP;
-	read_message->u.tapdisk_pid = test_pid;
-
-	pid_ipc_params = setup_ipc(
-		expected_sock_name, ipc_socket,
-		&write_message, read_message, 1);
-
-	test_free(read_message);
 
 	/* IPC List */
 	memset(&write_message, 0, sizeof(write_message));
@@ -175,7 +158,6 @@ void test_tap_ctl_list_success_one_td_no_minor_no_path(void **state)
 
 	tap_ctl_list_free(&list);
 
-	free_ipc_params(pid_ipc_params);
 	free_ipc_params(list_ipc_params);
 }
 
@@ -185,12 +167,10 @@ void test_tap_ctl_list_success_one_td_one_minor_no_path(void **state)
 	tap_list_t *entry;
 	struct list_head list = LIST_HEAD_INIT(list);
 
-	pid_t test_pid = 1236;
 	int ipc_socket = 7;
 	char *expected_sock_name = "/run/blktap-control/ctl1236";
 	tapdisk_message_t write_message;
 	tapdisk_message_t *read_message;
-	struct mock_ipc_params *pid_ipc_params;
 	struct mock_ipc_params *list_ipc_params;
 	char *sys_glob_path = "/run/nonpersistent/tapdisk/tapdisk-0";
 	char *sys_glob_data;
@@ -215,21 +195,6 @@ void test_tap_ctl_list_success_one_td_one_minor_no_path(void **state)
 	will_return(__wrap_glob, 0);
 	will_return(__wrap_glob, 1);
 	will_return(__wrap_glob, pathv);
-
-	/* IPC PID */
-	memset(&write_message, 0, sizeof(write_message));
-	write_message.type = TAPDISK_MESSAGE_PID;
-
-	read_message = test_malloc(sizeof(*read_message));
-	memset(read_message, 0, sizeof(*read_message));
-	read_message->type = TAPDISK_MESSAGE_PID_RSP;
-	read_message->u.tapdisk_pid = test_pid;
-
-	pid_ipc_params = setup_ipc(
-		expected_sock_name, ipc_socket,
-		&write_message, read_message, 1);
-
-	test_free(read_message);
 
 	/* IPC List */
 	memset(&write_message, 0, sizeof(write_message));
@@ -267,7 +232,6 @@ void test_tap_ctl_list_success_one_td_one_minor_no_path(void **state)
 
 	tap_ctl_list_free(&list);
 
-	free_ipc_params(pid_ipc_params);
 	free_ipc_params(list_ipc_params);
 }
 
@@ -277,12 +241,10 @@ void test_tap_ctl_list_success(void **state)
 	tap_list_t *entry;
 	struct list_head list = LIST_HEAD_INIT(list);
 
-	pid_t test_pid = 1236;
 	int ipc_socket = 7;
 	char *expected_sock_name = "/run/blktap-control/ctl1236";
 	tapdisk_message_t write_message;
 	tapdisk_message_t *read_message;
-	struct mock_ipc_params *pid_ipc_params;
 	struct mock_ipc_params *list_ipc_params;
 	char *sys_glob_path = "/run/blktap-control/tapdisk/tapdisk-0";
 	char *sys_glob_data;
@@ -310,21 +272,6 @@ void test_tap_ctl_list_success(void **state)
 	will_return(__wrap_glob, 0);
 	will_return(__wrap_glob, 1);
 	will_return(__wrap_glob, pathv);
-
-	/* IPC PID */
-	memset(&write_message, 0, sizeof(write_message));
-	write_message.type = TAPDISK_MESSAGE_PID;
-
-	read_message = test_malloc(sizeof(*read_message));
-	memset(read_message, 0, sizeof(*read_message));
-	read_message->type = TAPDISK_MESSAGE_PID_RSP;
-	read_message->u.tapdisk_pid = test_pid;
-
-	pid_ipc_params = setup_ipc(
-		expected_sock_name, ipc_socket,
-		&write_message, read_message, 1);
-
-	test_free(read_message);
 
 	/* IPC List */
 	memset(&write_message, 0, sizeof(write_message));
@@ -366,6 +313,5 @@ void test_tap_ctl_list_success(void **state)
 
 	tap_ctl_list_free(&list);
 
-	free_ipc_params(pid_ipc_params);
 	free_ipc_params(list_ipc_params);
 }

@@ -217,10 +217,11 @@ _tap_ctl_find_tapdisks(struct list_head *list)
 		if (n != 1)
 			goto skip;
 
-		tl->pid = tap_ctl_get_pid(tl->pid);
-		if (tl->pid < 0)
-			goto skip;
-
+		/*
+		 * The pid is taken directly from the socket name; liveness is
+		 * established later when _tap_ctl_list_tapdisk() connects. This
+		 * avoids a redundant connect + PID round-trip per tapdisk.
+		 */
 		list_add_tail(&tl->entry, list);
 		n_taps++;
 		continue;
@@ -341,7 +342,16 @@ tap_ctl_list(struct list_head *list)
 
 		err = _tap_ctl_list_tapdisk(t->pid, &vbds);
 
-		if (err || list_empty(&vbds)) {
+		if (err) {
+			/*
+			 * The tapdisk went away between the glob and the
+			 * connect; drop it rather than reporting a stale pid.
+			 */
+			_tap_list_free(t);
+			continue;
+		}
+
+		if (list_empty(&vbds)) {
 			list_move_tail(&t->entry, list);
 			continue;
 		}
