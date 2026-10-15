@@ -269,10 +269,11 @@ __lio_setup_aio_poll(libaio_queue *queue, int qlen)
 
 	lio->aio_ctx = REQUEST_ASYNC_FD;
 
+	/* io_setup() returns -errno, it does not set errno */
 	fd = io_setup(qlen, &lio->aio_ctx);
 	if (fd < 0) {
 		lio->aio_ctx = 0;
-		err = -errno;
+		err = fd;
 
 		if (err == -EINVAL)
 			goto fail_fd;
