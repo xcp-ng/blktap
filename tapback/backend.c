@@ -338,7 +338,7 @@ physical_device_path_changed(vbd_t *device) {
 	 */
 	if ((err = tap_ctl_info(device->tap->pid, &device->sectors,
 					&device->sector_size, &device->info,
-					device->minor))) {
+					device->minor, &device->enable_flush_cache))) {
 		WARN(device, "error retrieving disk characteristics: %s\n",
 		     strerror(-err));
 		goto out;
@@ -496,7 +496,7 @@ physical_device_changed(vbd_t *device) {
      */
     if ((err = tap_ctl_info(device->tap->pid, &device->sectors,
                     &device->sector_size, &info,
-                    device->minor))) {
+                    device->minor, NULL))) {
         WARN(device, "error retrieving disk characteristics: %s\n",
                 strerror(-err));
         goto out;

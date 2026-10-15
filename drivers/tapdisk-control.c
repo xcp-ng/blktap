@@ -793,6 +793,12 @@ tapdisk_control_open_image(struct tapdisk_ctl_conn *conn,
 		vbd->encryption.key_size = key_size;
 		vbd->encryption.encryption_key = encryption_key;
 	}
+	if (request->u.params.flags & TAPDISK_MESSAGE_FLAG_ENABLE_FLUSH_CACHE) {
+		vbd->enable_flush_cache = 1;
+		DPRINTF("Enabling feature-flush-cache advertisement\n");
+	} else {
+		vbd->enable_flush_cache = 0;
+	}
 
 	err = tapdisk_vbd_open_vdi(vbd, request->u.params.path, flags,
 				   request->u.params.prt_devnum);
@@ -1249,15 +1255,14 @@ tapdisk_control_disk_info(
         goto out;
 	}
 
-    DPRINTF("VBD %d got disk info: sectors=%llu sector size=%ld, info=%d\n",
-            vbd->uuid, (unsigned long long)vbd->disk_info.size,
-            vbd->disk_info.sector_size, vbd->disk_info.info);
 out:
     if (!err) {
         response->type = TAPDISK_MESSAGE_DISK_INFO_RSP;
         image->sectors = vbd->disk_info.size;
         image->sector_size = vbd->disk_info.sector_size;
         image->info = vbd->disk_info.info;
+        if (vbd->enable_flush_cache)
+            image->info |= TAPDISK_IMAGE_INFO_ENABLE_FLUSH_CACHE;
     }
     return err;
 }

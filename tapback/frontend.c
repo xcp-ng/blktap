@@ -300,6 +300,20 @@ connect_frontend(vbd_t *device) {
             break;
         }
 
+        /*
+         * Conditionally advertise flush-cache support based on flag from SM.
+         * FLUSH operations are implemented as no-ops since O_DIRECT bypasses cache.
+         */
+        if (device->enable_flush_cache) {
+            if ((err = tapback_device_printf(device, xst, "feature-flush-cache", true,
+                            "1"))) {
+                WARN(device, "failed to write feature-flush-cache: %s\n",
+						strerror(-err));
+                break;
+            }
+            DBG(device, "advertised feature-flush-cache\n");
+        }
+
         if ((err = tapback_device_printf(device, xst, "sector-size", true,
                         "%u", device->sector_size))) {
             WARN(device, "failed to write sector-size: %s\n", strerror(-err));

@@ -56,6 +56,7 @@
 #define TAPDISK_MESSAGE_FLAG_STANDBY     0x100
 #define TAPDISK_MESSAGE_FLAG_NO_O_DIRECT 0x200
 #define TAPDISK_MESSAGE_FLAG_OPEN_ENCRYPTED 0x400
+#define TAPDISK_MESSAGE_FLAG_ENABLE_FLUSH_CACHE 0x800
 
 typedef struct tapdisk_message           tapdisk_message_t;
 typedef uint32_t                         tapdisk_message_flag_t;
@@ -77,6 +78,12 @@ struct tapdisk_message_params {
 	uint16_t                         req_timeout;
 	char                             secondary[TAPDISK_MESSAGE_MAX_PATH_LENGTH];
 };
+
+/*
+ * Private bit in tapdisk_message_image.info used to signal enable_flush_cache
+ * to tapback. Stripped before the info value is exposed externally.
+ */
+#define TAPDISK_IMAGE_INFO_ENABLE_FLUSH_CACHE (1 << 16)
 
 struct tapdisk_message_image {
 	uint64_t                         sectors;
