@@ -33,9 +33,12 @@
 #include <setjmp.h>
 #include <cmocka.h>
 #include <stdlib.h>
+#include <string.h>
+#include <arpa/inet.h>
 
 #include "test-suites.h"
 #include "tapdisk.h"
+#include "tapdisk-vbd.h"
 #include "tapdisk-nbdserver.h"
 #include "tapdisk-protocol-new.h"
 
@@ -66,4 +69,64 @@ test_nbdserver_new_protocol_handshake(void **state)
 	expect_value(__wrap_tapdisk_server_register_event, mode, SCHEDULER_POLL_READ_FD);
 	int err = tapdisk_nbdserver_new_protocol_handshake(&client, new_fd);
 	assert_int_equal(err, 0);
+}
+
+/*
+ * Regression test for the block-status disconnect: a NBD_CMD_BLOCK_STATUS
+ * request that carries a command flag (qemu always sets NBD_CMD_FLAG_REQ_ONE)
+ * must still be recognised and queued, not dropped into the "unsupported
+ * operation" path which closes the client connection.
+ */
+void
+test_nbdserver_block_status_req_one_is_queued(void **state)
+{
+	td_nbdserver_t server;
+	td_vbd_t vbd;
+	td_nbdserver_client_t client;
+	td_nbdserver_req_t reqs[2];
+	td_nbdserver_req_t *reqs_free[2];
+	struct nbd_request request;
+
+	bzero(&server, sizeof(server));
+	bzero(&vbd, sizeof(vbd));
+	bzero(&client, sizeof(client));
+	bzero(reqs, sizeof(reqs));
+
+	INIT_LIST_HEAD(&vbd.new_requests);
+	server.vbd = &vbd;
+
+	client.server = &server;
+	client.client_fd = 42;
+	client.structured_reply = true;
+	client.n_reqs = 2;
+	client.reqs = reqs;
+	client.n_reqs_free = 2;
+	reqs_free[0] = &reqs[0];
+	reqs_free[1] = &reqs[1];
+	client.reqs_free = reqs_free;
+
+	/* A block status request with the command flags set, as qemu sends. */
+	bzero(&request, sizeof(request));
+	request.magic = htonl(NBD_REQUEST_MAGIC);
+	request.flags = htons(NBD_CMD_FLAG_REQ_ONE);
+	request.type  = htons(TAPDISK_NBD_CMD_BLOCK_STATUS);
+	request.from  = 0;
+	request.len   = htonl(512);
+
+	/* recv_fully_or_fail() pulls the whole request in a single recv(). */
+	will_return(__wrap_recv, &request);
+
+	tapdisk_nbdserver_clientcb(0, 0, &client);
+
+	/* The request was queued rather than the connection being torn down. */
+	assert_int_equal(vbd.received, 1);
+	assert_false(list_empty(&vbd.new_requests));
+
+	/* alloc_request() hands out reqs_free[1]; REQ_ONE was recorded on it. */
+	assert_true(reqs[1].req_one);
+	assert_int_equal(reqs[1].vreq.op, TD_OP_BLOCK_STATUS);
+
+	/* Free what create_request_vreq() allocated. */
+	free(reqs[1].iov.base);
+	free(reqs[1].vreq.data);
 }

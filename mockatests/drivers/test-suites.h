@@ -59,8 +59,10 @@ static const struct CMUnitTest tapdisk_vbd_tests[] = {
 
 void test_nbdserver_new_protocol_handshake(void **state);
 void test_nbdserver_new_protocol_handshake_send_fails(void **state);
+void test_nbdserver_block_status_req_one_is_queued(void **state);
 static const struct CMUnitTest tapdisk_nbdserver_tests[] = {
-	cmocka_unit_test(test_nbdserver_new_protocol_handshake)
+	cmocka_unit_test(test_nbdserver_new_protocol_handshake),
+	cmocka_unit_test(test_nbdserver_block_status_req_one_is_queued)
 };
 
 void test_scheduler_set_max_timeout(void **state);

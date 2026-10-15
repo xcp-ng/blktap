@@ -82,8 +82,16 @@ struct nbd_request {
 
 struct nbd_reply {
 	uint32_t magic;
-	uint32_t error;		
-	char handle[8];		
+	uint32_t error;
+	char handle[8];
+};
+
+struct td_nbdserver_req {
+	td_vbd_request_t        vreq;
+	char                    id[16];
+	struct td_iovec         iov;
+	/* NBD_CMD_FLAG_REQ_ONE was set: client wants a single extent */
+	bool                    req_one;
 };
 
 
