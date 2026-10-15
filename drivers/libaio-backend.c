@@ -573,7 +573,14 @@ fail:
 static void
 libaio_backend_free_queue(tqueue *q)
 {
-	libaio_queue *queue = (libaio_queue*)*q;
+	libaio_queue *queue;
+
+	/* A queue whose setup failed, or which has already been freed, is
+	 * NULL. Both are reachable from tapdisk_server_close_aio(). */
+	if (!q || !*q)
+		return;
+
+	queue = (libaio_queue*)*q;
 	libaio_backend_queue_free_io(queue);
 
 	free(queue->iocbs);

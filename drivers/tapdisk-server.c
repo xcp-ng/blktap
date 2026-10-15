@@ -320,8 +320,10 @@ tapdisk_server_init_aio(void)
 static void
 tapdisk_server_close_aio(void)
 {
-	server.rw_backend->free_queue(&server.rw_queue);
-	server.ro_backend->free_queue(&server.ro_queue);
+	if (server.rw_backend)
+		server.rw_backend->free_queue(&server.rw_queue);
+	if (server.ro_backend)
+		server.ro_backend->free_queue(&server.ro_queue);
 }
 
 int
