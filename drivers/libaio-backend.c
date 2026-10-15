@@ -306,8 +306,16 @@ __lio_setup_aio_eventfd(libaio_queue *queue, int qlen)
 	}
 
 	lio->event_fd = eventfd(0, 0);
-	if (lio->event_fd < 0)
-		return  -errno;
+	if (lio->event_fd < 0) {
+		err = -errno;
+		/*
+		 * The caller falls back to the poll variant, which overwrites
+		 * aio_ctx. Release the context now or its handle is lost and
+		 * it can never be destroyed.
+		 */
+		libaio_backend_lio_destroy_aio(queue);
+		return err;
+	}
 
 	lio->flags |= LIO_FLAG_EVENTFD;
 
