@@ -34,10 +34,10 @@
 #include "tapdisk-driver.h"
 #include "tapdisk-interface.h"
 
-void *img;
-long int   disksector_size;
-long int   disksize;
-long int   diskinfo;
+static void *img;
+static long int   disksector_size;
+static long int   disksize;
+static long int   diskinfo;
 static int connections = 0;
 
 struct tdram_state {

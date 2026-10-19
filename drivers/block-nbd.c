@@ -61,7 +61,7 @@
  * too.
  */
 
-struct td_fdreceiver *fdreceiver = NULL;
+static struct td_fdreceiver *fdreceiver = NULL;
 
 struct tdnbd_passed_fd {
 	char                    id[40];
@@ -803,8 +803,6 @@ tdnbd_connect_import_session(struct tdnbd_data *prv, td_driver_t* driver)
 
 /* -- interface -- */
 
-static int tdnbd_close(td_driver_t*);
-
 static int
 tdnbd_open(td_driver_t* driver, const char* name,
 	   struct td_vbd_encryption *encryption, td_flag_t flags)
@@ -916,11 +914,9 @@ tdnbd_open(td_driver_t* driver, const char* name,
 	prv->state = TDNBD_OPEN;
 
 	if (flags & TD_OPEN_SECONDARY)
-		INFO("Opening in secondary mode: Read requests will be "
-				"forwarded");
+		INFO("Opening in secondary mode: Read requests will be forwarded");
 
 	return 0;
-
 }
 
 #define TDNBD_CLOSE_TIMEOUT_MS (10 * 1000)
@@ -1055,8 +1051,8 @@ tdnbd_queue_write(td_driver_t* driver, td_request_t treq)
 	int      size    = treq.secs * driver->info.sector_size;
 	uint64_t offset  = treq.sec * (uint64_t)driver->info.sector_size;
 
-	tdnbd_queue_request(prv, TAPDISK_NBD_CMD_WRITE,
-			offset, treq.buf, size, treq, 0);
+	tdnbd_queue_request(prv, TAPDISK_NBD_CMD_WRITE, offset, treq.buf, size,
+			    treq, 0);
 }
 
 static int

@@ -456,7 +456,7 @@ done:
 	return 0;
 }
 
-int
+static int
 tapdisk_vbd_add_secondary(td_vbd_t *vbd)
 {
 	td_image_t *leaf, *second = NULL;

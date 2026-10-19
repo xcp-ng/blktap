@@ -57,7 +57,7 @@ td_load(td_image_t *image)
 	return 0;
 }
 
-int
+static int
 __td_open(td_image_t *image, struct td_vbd_encryption *encryption, td_disk_info_t *info)
 {
 	int err;
