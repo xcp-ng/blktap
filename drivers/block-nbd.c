@@ -116,10 +116,10 @@ struct tdnbd_data
 	char                   *name;
 
 	int                     flags;
-	enum tdnbd_state        state;
+	enum tdnbd_state        state;       /* TODO: check its atomicity */
 
-	unsigned int            handle_id;
 	pthread_mutex_t         lock;
+	unsigned int            handle_id;   /* TODO: to replaced by a per-queue counter or an atomic */
 };
 
 static void disable_write_queue(struct tdnbd_data *prv);
@@ -127,6 +127,7 @@ static void disable_write_queue(struct tdnbd_data *prv);
 
 /* -- fdreceiver bits and pieces -- */
 
+/* EVa: called at close */
 static void
 tdnbd_stash_passed_fd(int fd, char *msg, void *data /* unused */)
 {
@@ -160,6 +161,7 @@ tdnbd_stash_passed_fd(int fd, char *msg, void *data /* unused */)
 		     sizeof(passed_fds[free_index].id));
 }
 
+/* EVa: called at open */
 static int
 tdnbd_retrieve_passed_fd(const char *name)
 {
@@ -335,7 +337,7 @@ tdnbd_writer_cb(event_id_t eb, char mode, void *data)
 				goto out;
 		}
 
-		list_move(&pos->queue, &prv->sent_reqs);
+		list_move(&pos->queue, &prv->sent_reqs);  /* TODO: to protect */
 	}
 
 	/* If we're here, we've written everything */
@@ -372,7 +374,7 @@ tdnbd_queue_request_locked(struct tdnbd_data *prv, int type, uint64_t offset,
 		return -EBUSY;
 
 	if (prv->state == TDNBD_DEAD) {
-		td_complete_request(treq, -ETIMEDOUT);
+		td_complete_request(treq, -ETIMEDOUT);  // called under our lock
 		return -ETIMEDOUT;
 	}
 
@@ -426,6 +428,7 @@ tdnbd_queue_request(struct tdnbd_data *prv, int type, uint64_t offset,
 
 
 /* NBD Reader callback */
+/*  called from scheduler (single queue) */
 
 static void
 tdnbd_reader_cb(event_id_t eb, char mode, void *data)
@@ -485,6 +488,8 @@ tdnbd_reader_cb(event_id_t eb, char mode, void *data)
 		if (rc > 0)
 			goto out; /* need more data */
 
+		// FIXME: should we unlock around that call ?
+		// FIXME2: check that td_complete_request is thread-safe
 		td_complete_request(prv->curr_reply_req->treq, 0);
 
 		break;
@@ -1076,7 +1081,7 @@ tdnbd_queue_read(td_driver_t* driver, td_request_t treq)
 	uint64_t offset  = treq.sec * (uint64_t)driver->info.sector_size;
 
 	if (prv->flags & TD_OPEN_SECONDARY)
-		td_forward_request(treq);
+		td_forward_request(treq);       /* TODO: check that this function is thread-safe */
 	else
 		tdnbd_queue_request(prv, TAPDISK_NBD_CMD_READ, offset, treq.buf, size,
 				treq, 0);
