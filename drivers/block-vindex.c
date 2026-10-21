@@ -892,6 +892,14 @@ vhd_index_debug(td_driver_t *driver)
 	}
 }
 
+static int
+vhd_index_pending(td_driver_t *driver)
+{
+	vhd_index_t *index = driver->data;
+
+	return VHD_INDEX_REQUESTS - index->requests_free_cnt;
+}
+
 struct tap_disk tapdisk_vhd_index = {
 	.disk_type                = "tapdisk_vhd_index",
 	.flags                    = 0,
@@ -902,5 +910,6 @@ struct tap_disk tapdisk_vhd_index = {
 	.td_queue_write           = vhd_index_queue_write,
 	.td_get_parent_id         = vhd_index_get_parent_id,
 	.td_validate_parent       = vhd_index_validate_parent,
+	.td_pending               = vhd_index_pending,
 	.td_debug                 = vhd_index_debug,
 };
