@@ -1225,7 +1225,7 @@ static td_vbd_request_t *create_request_vreq(
 	memcpy(req->id, request.handle, sizeof(request.handle));
 
 	rc = posix_memalign(&req->iov.base, 512, len);
-	if (rc < 0) {
+	if (rc != 0) {
 		ERR("posix_memalign failed (%d)", rc);
 		goto fail;
 	}
