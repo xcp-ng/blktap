@@ -1106,6 +1106,19 @@ tdnbd_validate_parent(td_driver_t *driver,
 	return -EINVAL;
 }
 
+static int
+tdnbd_pending(td_driver_t *driver)
+{
+	struct tdnbd_data *prv = (struct tdnbd_data *)driver->data;
+	int n_pending;
+
+	pthread_mutex_lock(&prv->lock);
+	n_pending = MAX_NBD_REQS - prv->nr_free_count;
+	pthread_mutex_unlock(&prv->lock);
+
+	return n_pending;
+}
+
 struct tap_disk tapdisk_nbd = {
 	.disk_type          = "tapdisk_nbd",
 	.private_data_size  = sizeof(struct tdnbd_data),
@@ -1116,4 +1129,5 @@ struct tap_disk tapdisk_nbd = {
 	.td_queue_write     = tdnbd_queue_write,
 	.td_get_parent_id   = tdnbd_get_parent_id,
 	.td_validate_parent = tdnbd_validate_parent,
+	.td_pending         = tdnbd_pending,
 };
