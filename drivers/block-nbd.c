@@ -205,7 +205,7 @@ tdnbd_fdreceiver_stop()
 }
 
 static void
-__cancel_req(int i, struct td_nbd_request *pos, int e)
+__cancel_req(struct tdnbd_data *prv, int i, struct td_nbd_request *pos, int e)
 {
 	INFO("Entry %d: handle='%s' type=%d, len=%d: %s",
 	     i, pos->nreq.handle, ntohs(pos->nreq.type), ntohl(pos->nreq.len), strerror(e));
@@ -214,6 +214,11 @@ __cancel_req(int i, struct td_nbd_request *pos, int e)
 		tapdisk_server_unregister_event(pos->timeout_event);
 		pos->timeout_event = -1;
 	}
+
+	/* give the slot back so that it is not cancelled twice and
+	 * td_pending() does not report it forever */
+	list_move(&pos->queue, &prv->free_reqs);
+	prv->nr_free_count++;
 
 	td_complete_request(pos->treq, e);
 }
@@ -233,11 +238,13 @@ tdnbd_disable_locked(struct tdnbd_data *prv, int e)
 
 	INFO("NBD client cancelling sent reqs");
 	list_for_each_entry_safe(pos, q, &prv->sent_reqs, queue)
-		__cancel_req(i++, pos, e);
+		__cancel_req(prv, i++, pos, e);
 
 	INFO("NBD client cancelling pending reqs");
 	list_for_each_entry_safe(pos, q, &prv->pending_reqs, queue)
-		__cancel_req(i++, pos, e);
+		__cancel_req(prv, i++, pos, e);
+
+	prv->curr_reply_req = NULL;
 
 	INFO("Setting state to dead");
 	prv->state = TDNBD_DEAD;
