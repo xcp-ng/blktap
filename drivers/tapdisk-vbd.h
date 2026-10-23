@@ -168,6 +168,14 @@ struct td_vbd_handle {
 
 	bool                       watchdog_warned;
 
+	/* Test-only completion delays; disabled until explicitly signalled.
+	 * All fields are protected by mutex. At most one held read per VBD.
+	 */
+	bool                        completion_delay_enabled;
+	uint32_t                    completion_delay_random;
+	unsigned int                completion_delay_skip;
+	void                       *completion_delay_held;
+
 	td_flag_t                  driver_flags;
 	int                        efd;
 	event_id_t                 event;

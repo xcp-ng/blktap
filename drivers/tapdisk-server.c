@@ -447,6 +447,31 @@ tapdisk_server_signal_handler(event_id_t id, char mode __attribute__((unused)), 
 
 	signal = fdsi.ssi_signo;
 
+	/* Queued real-time signals address one disk by its tap-ctl minor.
+	 * Plain kill is deliberately ignored: it carries no disk selection.
+	 */
+	if (signal == SIGRTMIN || signal == SIGRTMIN + 1) {
+		if ((int)fdsi.ssi_code != SI_QUEUE || fdsi.ssi_int > UINT16_MAX) {
+			DBG(TLOG_WARN, "completion-delay: expected queued signal with minor\n");
+			return;
+		}
+		vbd = tapdisk_server_get_vbd((td_uuid_t)fdsi.ssi_int);
+		if (!vbd) {
+			DBG(TLOG_WARN, "completion-delay: unknown minor=%u\n", fdsi.ssi_int);
+			return;
+		}
+		pthread_mutex_lock(&vbd->mutex);
+		vbd->completion_delay_enabled = signal == SIGRTMIN;
+		/* Re-enabling restarts a reproducible per-disk sequence. */
+		vbd->completion_delay_random = 0x9e3779b9U ^ vbd->uuid;
+		vbd->completion_delay_skip = 0;
+		DBG(TLOG_WARN, "completion-delay: minor=%u enabled=%d name=%s\n",
+		    vbd->uuid, vbd->completion_delay_enabled,
+		    vbd->name ? vbd->name : "(unopened)");
+		pthread_mutex_unlock(&vbd->mutex);
+		return;
+	}
+
 	switch (signal) {
 	case SIGBUS:
 		tapdisk_server_for_each_vbd(vbd, tmp)
@@ -860,6 +885,8 @@ tapdisk_server_run()
 	sigaddset(&set, SIGUSR2);
 	sigaddset(&set, SIGHUP);
 	sigaddset(&set, SIGXFSZ);
+	sigaddset(&set, SIGRTMIN);
+	sigaddset(&set, SIGRTMIN + 1);
 	server.sigfd = signalfd(-1, &set, 0);
 	if (server.sigfd == -1) {
 		err = errno;
