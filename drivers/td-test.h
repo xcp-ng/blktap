@@ -54,6 +54,9 @@
 struct td_test;
 struct tdtest_whold;
 
+/* td_xenblkif.tdtest_flags */
+#define TDTEST_RING_PAUSED           0x1 /* intake_pause=current */
+
 /* tdtest_complete() @rsp for a dead ring: no response is published */
 #define TDTEST_RSP_NONE              1
 
@@ -72,6 +75,7 @@ void tdtest_ring_connect(struct td_xenblkif *blkif);
 void tdtest_ring_disconnect(struct td_xenblkif *blkif, int pending);
 
 /* td-ctx.c */
+bool tdtest_ring_blocked(struct td_xenblkif *blkif);
 void tdtest_ring_intake(struct td_xenblkif *blkif,
 		blkif_request_t *reqs[], int n_reqs);
 

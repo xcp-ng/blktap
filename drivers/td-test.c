@@ -657,6 +657,83 @@ tdtest_log_ring(const char *ev, const struct td_xenblkif *blkif,
 	tdtest_line_emit(&l);
 }
 
+/* Unpauses every ring of this VBD. Live rings get a ring check. */
+static void
+tdtest_unpause_rings(td_vbd_t *vbd)
+{
+	struct td_xenblkif *blkif;
+
+	list_for_each_entry(blkif, &vbd->rings, entry) {
+		if (!(blkif->tdtest_flags & TDTEST_RING_PAUSED))
+			continue;
+		blkif->tdtest_flags &= ~TDTEST_RING_PAUSED;
+		tdtest_log_ring("intake-resume", blkif, NULL);
+		if (blkif->chkrng_event >= 0)
+			tapdisk_xenblkif_sched_chkrng(blkif);
+	}
+
+	/*
+	 * Dead rings are not kicked here: that would be dead-ring intake on
+	 * demand. Use dead_chkrng_kick=1 for that, or wait for their own
+	 * chkrng fallback timer.
+	 */
+	list_for_each_entry(blkif, &vbd->dead_rings, entry) {
+		if (!(blkif->tdtest_flags & TDTEST_RING_PAUSED))
+			continue;
+		blkif->tdtest_flags &= ~TDTEST_RING_PAUSED;
+		tdtest_log_ring("intake-resume", blkif, NULL);
+	}
+}
+
+/*
+ * intake_pause=current: pause the rings live now. If rings are paused
+ * already, from an earlier reload, the set is left as it is, so that a
+ * reload that only changes other keys does not pause a newer ring.
+ */
+static void
+tdtest_pause_rings(td_vbd_t *vbd)
+{
+	struct td_xenblkif *blkif;
+
+	list_for_each_entry(blkif, &vbd->rings, entry)
+		if (blkif->tdtest_flags & TDTEST_RING_PAUSED)
+			return;
+
+	list_for_each_entry(blkif, &vbd->dead_rings, entry)
+		if (blkif->tdtest_flags & TDTEST_RING_PAUSED)
+			return;
+
+	list_for_each_entry(blkif, &vbd->rings, entry) {
+		blkif->tdtest_flags |= TDTEST_RING_PAUSED;
+		tdtest_log_ring("intake-pause", blkif, NULL);
+	}
+}
+
+static void
+tdtest_kick_dead_rings(td_vbd_t *vbd)
+{
+	struct td_xenblkif *blkif;
+
+	list_for_each_entry(blkif, &vbd->dead_rings, entry) {
+		if (blkif->chkrng_event < 0) {
+			tdtest_log_ring("dead-kick", blkif,
+					"skipped=chkrng-unregistered");
+			continue;
+		}
+		tdtest_log_ring("dead-kick", blkif, NULL);
+		tapdisk_xenblkif_sched_chkrng(blkif);
+	}
+}
+
+bool
+tdtest_ring_blocked(struct td_xenblkif *blkif)
+{
+	if (blkif->tdtest_flags & TDTEST_RING_PAUSED)
+		return true;
+
+	return false;
+}
+
 void
 tdtest_ring_intake(struct td_xenblkif *blkif, blkif_request_t *reqs[],
 		int n_reqs)
@@ -1164,6 +1241,8 @@ tdtest_disable(td_vbd_t *vbd, const char *reason)
 	memcpy(seq, td->cfg.seq, sizeof(seq));
 	pthread_mutex_unlock(&td->lock);
 
+	tdtest_unpause_rings(vbd);
+
 	TDTEST_LOG("off minor=%u seq=%s reason=%s", vbd->uuid, seq, reason);
 }
 
@@ -1241,6 +1320,14 @@ tdtest_reload(td_vbd_t *vbd)
 			cfg.fix_dead_intake ? 1 : 0,
 			cfg.fix_gate_new_ring ? 1 : 0,
 			vbd->name);
+
+	if (cfg.intake_pause)
+		tdtest_pause_rings(vbd);
+	else
+		tdtest_unpause_rings(vbd);
+
+	if (cfg.dead_chkrng_kick)
+		tdtest_kick_dead_rings(vbd);
 }
 
 void

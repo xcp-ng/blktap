@@ -222,6 +222,9 @@ struct td_xenblkif {
 	bool in_polling;
 	int poll_duration; /* microseconds; 0 means no polling. */
 	int poll_idle_threshold;
+
+	/* Test-only TDTEST_RING_* flags, see td-test.h. */
+	unsigned int tdtest_flags;
 };
 
 #define RING_DEBUG(blkif, fmt, args...)                                     \
