@@ -958,8 +958,9 @@ tdnbd_wait_fd(int fd, short events)
 }
 
 /*
- * Cleanly disconnect from the server: flush the pending requests, then send
- * NBD_CMD_DISC. The connection is disabled afterwards, whatever the outcome.
+ * Cleanly disconnect from the server: flush the pending requests, wait for
+ * the replies to the ones in flight, then send NBD_CMD_DISC. The connection
+ * is disabled afterwards, whatever the outcome.
  */
 static int
 tdnbd_disconnect(struct tdnbd_data *prv)
@@ -974,6 +975,14 @@ tdnbd_disconnect(struct tdnbd_data *prv)
 		if (rc <= 0)
 			goto fail;
 		tdnbd_writer_cb(0, 0, prv);
+	}
+
+	INFO("Waiting for the replies to the sent requests");
+	while (prv->state != TDNBD_DEAD && !list_empty(&prv->sent_reqs)) {
+		rc = tdnbd_wait_fd(prv->socket, POLLIN);
+		if (rc <= 0)
+			goto fail;
+		tdnbd_reader_cb(0, 0, prv);
 	}
 
 	if (prv->state == TDNBD_DEAD)
