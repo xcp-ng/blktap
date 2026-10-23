@@ -296,6 +296,10 @@ tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
     blkif_request_t **reqs;
     int limit;
 
+    /* Test-only: intake_pause, see td-test.c */
+    if (unlikely(blkif->vbd->tdtest) && tdtest_ring_blocked(blkif))
+        return 0;
+
     /*
      * Do not take requests off a dead ring: its frontend has closed it, and
      * the grants of whatever it left on the shared ring may have been
