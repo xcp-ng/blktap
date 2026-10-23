@@ -53,6 +53,7 @@
 #include "tapdisk.h"
 #include "timeout-math.h"
 #include "util.h"
+#include "td-test.h"
 
 #ifdef DEBUG
 #define BLKIF_MSG_POISON 0xdeadbeef
@@ -595,105 +596,18 @@ out:
 	return blkif_destroyed;
 }
 
-/* Test hook: delay a successful read before grant-copy / response publication.
- * The caller (tapdisk_vbd_kick) already holds vbd->mutex. The outstanding
- * ring request keeps blkif alive, including across a normal disconnect.
- */
-struct td_completion_delay {
-    struct td_xenblkif *blkif;
-    struct td_xenblkif_req *req;
-    event_id_t event;
-};
-
-static uint32_t
-completion_delay_random(td_vbd_t *vbd)
-{
-    uint32_t x = vbd->completion_delay_random;
-
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    return vbd->completion_delay_random = x;
-}
-
-static void
-completion_delay_expired(event_id_t id, char mode, void *private)
-{
-    struct td_completion_delay *held = private;
-    struct td_xenblkif *blkif = held->blkif;
-    struct td_xenblkif_req *req = held->req;
-    td_vbd_t *vbd = blkif->vbd;
-
-    (void)mode;
-    tapdisk_server_unregister_event(id);
-    pthread_mutex_lock(&vbd->mutex);
-    vbd->completion_delay_held = NULL;
-    tlog_write(TLOG_WARN, "completion-delay: release minor=%u req=%"PRIu64" dead=%d\n",
-              vbd->uuid, req->msg.id, blkif->dead);
-    free(held);
-    /* Always publish this completion even if it was not last in its batch.
-     * A dead ring instead discards the completion and may destroy itself.
-     */
-    tapdisk_xenblkif_complete_request(blkif, req, 0, 1, true);
-    pthread_mutex_unlock(&vbd->mutex);
-}
-
-/* Forced shutdown can discard outstanding rings. Cancel the test timer
- * before the VBD is freed so it cannot later dereference those rings.
+/*
+ * Completes a read that was held by tdtest_read_hold(), see td-test.c. The
+ * caller holds vbd->mutex, as tapdisk_vbd_kick() does around request
+ * callbacks. The response is published even if the request was not the
+ * last one of its batch. On a dead ring the copy-back and the response are
+ * skipped, and the ring may be destroyed.
  */
 void
-tapdisk_xenblkif_cancel_completion_delay(td_vbd_t *vbd)
+tapdisk_xenblkif_complete_held_read(struct td_xenblkif * const blkif,
+        struct td_xenblkif_req * const req)
 {
-    struct td_completion_delay *held = vbd->completion_delay_held;
-
-    if (held) {
-        tapdisk_server_unregister_event(held->event);
-        vbd->completion_delay_held = NULL;
-        free(held);
-    }
-}
-
-static bool
-completion_delay_hold(struct td_xenblkif *blkif,
-                      struct td_xenblkif_req *req, int error)
-{
-    td_vbd_t *vbd = blkif->vbd;
-    struct td_completion_delay *held;
-    unsigned int delay_ms;
-    struct timeval timeout;
-    event_id_t event;
-
-    if (!vbd->completion_delay_enabled || vbd->completion_delay_held ||
-        blkif->dead || error || req->msg.operation != BLKIF_OP_READ)
-        return false;
-
-    if (vbd->completion_delay_skip) {
-        vbd->completion_delay_skip--;
-        return false;
-    }
-
-    held = calloc(1, sizeof(*held));
-    if (!held)
-        return false;
-
-    delay_ms = 5000 + completion_delay_random(vbd) % 10001;
-    timeout.tv_sec = delay_ms / 1000;
-    timeout.tv_usec = (delay_ms % 1000) * 1000;
-    held->blkif = blkif;
-    held->req = req;
-    event = tapdisk_server_register_event(SCHEDULER_POLL_TIMEOUT, -1,
-                                         timeout, completion_delay_expired, held);
-    if (event < 0) {
-        free(held);
-        return false;
-    }
-
-    held->event = event;
-    vbd->completion_delay_held = held;
-    vbd->completion_delay_skip = 1 + completion_delay_random(vbd) % 64;
-    tlog_write(TLOG_WARN, "completion-delay: held minor=%u req=%"PRIu64" delay_ms=%u\n",
-              vbd->uuid, req->msg.id, delay_ms);
-    return true;
+    tapdisk_xenblkif_complete_request(blkif, req, 0, 1, true);
 }
 
 /**
@@ -717,7 +631,7 @@ __tapdisk_xenblkif_request_cb(struct td_vbd_request * const vreq,
 
     req = container_of(vreq, struct td_xenblkif_req, vreq);
 
-    if (completion_delay_hold(blkif, req, error))
+    if (unlikely(blkif->vbd->tdtest) && tdtest_read_hold(blkif, req, error))
         return;
 
     if (error) {

@@ -8,6 +8,13 @@ AM_CPPFLAGS  = -D_GNU_SOURCE
 AM_CPPFLAGS += -I$(top_srcdir)/include
 AM_CPPFLAGS += $(GLIB_CFLAGS)
 
+# Test-only: build identity for the "tdtest: v1 variant=" banner (td-test.c).
+# Override with "make TDTEST_VARIANT=...". The .git test keeps a source tree
+# unpacked inside some other git checkout from describing that checkout.
+TDTEST_GIT_DESCRIBE = $(shell if test -e $(top_srcdir)/.git; then cd $(top_srcdir) && git describe --always --tags --dirty 2>/dev/null; fi)
+TDTEST_VARIANT = $(if $(TDTEST_GIT_DESCRIBE),$(TDTEST_GIT_DESCRIBE),nogit)
+AM_CPPFLAGS += -DTDTEST_VARIANT='"$(TDTEST_VARIANT)"'
+
 libexec_PROGRAMS = tapdisk
 
 tapdisk_SOURCES = tapdisk2.c
@@ -100,6 +107,10 @@ libtapdisk_la_SOURCES += td-ctx.c
 libtapdisk_la_SOURCES += td-ctx.h
 libtapdisk_la_SOURCES += td-stats.c
 libtapdisk_la_SOURCES += td-stats.h
+
+# test-only hooks, see TDTEST.md
+libtapdisk_la_SOURCES += td-test.c
+libtapdisk_la_SOURCES += td-test.h
 
 libtapdisk_la_LIBADD  = ../vhd/lib/libvhd.la
 libtapdisk_la_LIBADD += ../qcow2/lib/libqcow2.la

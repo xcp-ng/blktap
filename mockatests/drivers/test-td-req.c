@@ -51,14 +51,6 @@
 unsigned int PAGE_SIZE;
 unsigned int PAGE_SHIFT;
 
-void
-__tlog_write(int level, const char *fmt, ...)
-{
-	(void)level;
-	(void)fmt;
-}
-
-
 event_id_t
 tapdisk_server_register_event(char m, int fd, struct timeval t,
 		event_cb_t cb, void *p)
@@ -110,6 +102,15 @@ enum memory_mode_t
 tapdisk_server_mem_mode(void)
 {
 	return NORMAL_MEMORY_MODE;
+}
+
+/* test-only tdtest hooks (td-test.c), inert: no VBD is ever addressed here */
+
+bool
+tdtest_read_hold(struct td_xenblkif *blkif, struct td_xenblkif_req *req,
+		int error)
+{
+	return false;
 }
 
 /* --- helpers --- */
