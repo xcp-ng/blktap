@@ -43,6 +43,7 @@
 #include "td-ctx.h"
 #include "tapdisk-log.h"
 #include "timeout-math.h"
+#include "td-test.h"
 
 #define ERROR(_f, _a...)           tlog_syslog(TLOG_WARN, "td-ctx: " _f, ##_a)
 
@@ -388,6 +389,9 @@ tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
 	memcpy(reqs, &blkif->reqs_free[blkif->ring_size - start],
 			sizeof(blkif_request_t*) * n_reqs);
 	pthread_mutex_unlock(&blkif->mutex);
+
+	if (unlikely(blkif->vbd->tdtest))
+		tdtest_ring_intake(blkif, reqs, n_reqs);
 
 	tapdisk_xenblkif_queue_requests(blkif, reqs, n_reqs);
 

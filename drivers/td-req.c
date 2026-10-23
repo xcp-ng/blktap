@@ -501,6 +501,8 @@ tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
 			ticks = &blkif->vbd_stats.stats->read_total_ticks;
 			if (likely(!err)) {
 				_err = guest_copy2(blkif, req);
+				if (unlikely(blkif->vbd->tdtest))
+					tdtest_copyback(blkif, req, _err);
 				if (unlikely(_err)) {
 					err = _err;
 					RING_ERR(blkif, "req %lu: failed to copy from/to guest: "
@@ -538,7 +540,10 @@ tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
 			_err = BLKIF_RSP_ERROR;
 
 		xenio_blkif_put_response(blkif, req, _err, final);
-	}
+		if (unlikely(blkif->vbd->tdtest))
+			tdtest_complete(blkif, req, err, _err, final);
+	} else if (unlikely(blkif->vbd->tdtest))
+		tdtest_complete(blkif, req, err, TDTEST_RSP_NONE, final);
 
 	tapdisk_xenblkif_free_request(blkif, req);
 
@@ -581,8 +586,11 @@ tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
 	if (unlikely(1 == depth
 				&& blkif->dead
 				&& !tapdisk_xenblkif_reqs_pending(blkif))) {
+		td_vbd_t *vbd = blkif->vbd;
 
 		RING_DEBUG(blkif, "destroying dead ring\n");
+		if (unlikely(vbd->tdtest))
+			tdtest_dead_ring_destroy(blkif);
 		pthread_mutex_unlock(&blkif->mutex);
 		tapdisk_xenblkif_destroy(blkif);
 		blkif_destroyed = true;
@@ -738,6 +746,8 @@ tapdisk_xenblkif_parse_request(struct td_xenblkif * const blkif,
 
     if (blkif_rq_wr(&req->msg)) {
         err = guest_copy2(blkif, req);
+        if (unlikely(blkif->vbd->tdtest))
+            tdtest_copyin(blkif, req, err);
         if (err) {
             RING_ERR(blkif, "req %lu: failed to copy from guest: %s\n",
                     req->msg.id, strerror(-err));

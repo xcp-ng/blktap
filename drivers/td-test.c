@@ -274,6 +274,15 @@ tdtest_req_crc(const struct td_xenblkif_req *req)
 	return (uint32_t)crc;
 }
 
+static bool
+tdtest_req_has_data(const struct td_xenblkif_req *req, int err)
+{
+	return !err && req->vma && req->msg.nr_segments &&
+		(req->msg.operation == BLKIF_OP_READ ||
+		 req->msg.operation == BLKIF_OP_WRITE ||
+		 req->msg.operation == BLKIF_OP_WRITE_BARRIER);
+}
+
 static void
 tdtest_line_crc(struct tdtest_line *l, const struct td_xenblkif_req *req)
 {
@@ -304,6 +313,24 @@ tdtest_in_window(uint64_t sec, uint64_t nsect, uint64_t start, uint64_t end)
 	if (sec >= start)
 		return true;
 	return start - sec < nsect;
+}
+
+static void
+tdtest_snapshot(struct td_test *td, struct tdtest_config *cfg, bool *enabled)
+{
+	pthread_mutex_lock(&td->lock);
+	*cfg = td->cfg;
+	*enabled = td->enabled;
+	pthread_mutex_unlock(&td->lock);
+}
+
+static bool
+tdtest_log_msg_enabled(const struct tdtest_config *cfg,
+		const blkif_request_t *msg)
+{
+	return cfg->log &&
+		tdtest_in_window(msg->sector_number, tdtest_msg_nsect(msg),
+				cfg->log_lba_start, cfg->log_lba_end);
 }
 
 /*
@@ -593,6 +620,183 @@ tdtest_config_load(td_vbd_t *vbd, struct tdtest_config *cfg,
 out:
 	fclose(f);
 	return err;
+}
+
+/*
+ * Ring control
+ */
+
+static void
+tdtest_log_ring(const char *ev, const struct td_xenblkif *blkif,
+		const char *extra)
+{
+	struct tdtest_line l;
+
+	tdtest_line_ring(&l, ev, blkif);
+	if (extra)
+		tdtest_line_add(&l, " %s", extra);
+	tdtest_line_emit(&l);
+}
+
+void
+tdtest_ring_intake(struct td_xenblkif *blkif, blkif_request_t *reqs[],
+		int n_reqs)
+{
+	struct tdtest_config cfg;
+	struct tdtest_line l;
+	bool enabled;
+	int i;
+
+	tdtest_snapshot(blkif->vbd->tdtest, &cfg, &enabled);
+	if (!enabled)
+		return;
+
+	for (i = 0; i < n_reqs; i++) {
+		if (blkif->dead)
+			tdtest_line_ring(&l, "dead-intake", blkif);
+		else if (tdtest_log_msg_enabled(&cfg, reqs[i]))
+			tdtest_line_ring(&l, "intake", blkif);
+		else
+			continue;
+
+		tdtest_line_msg(&l, reqs[i]);
+		tdtest_line_emit(&l);
+	}
+}
+
+void
+tdtest_ring_connect(struct td_xenblkif *blkif)
+{
+	struct tdtest_config cfg;
+	bool enabled;
+
+	tdtest_snapshot(blkif->vbd->tdtest, &cfg, &enabled);
+	if (!enabled)
+		return;
+
+	tdtest_log_ring("connect", blkif, NULL);
+}
+
+/*
+ * Called by tapdisk_xenblkif_disconnect, after the ring has been made dead
+ * if @pending, or before it is destroyed otherwise.
+ */
+void
+tdtest_ring_disconnect(struct td_xenblkif *blkif, int pending)
+{
+	struct tdtest_config cfg;
+	struct tdtest_line l;
+	bool enabled;
+
+	tdtest_snapshot(blkif->vbd->tdtest, &cfg, &enabled);
+	if (!enabled)
+		return;
+
+	tdtest_line_ring(&l, "disconnect", blkif);
+	tdtest_line_add(&l, " pending=%d", pending);
+	tdtest_line_emit(&l);
+}
+
+void
+tdtest_copyin(struct td_xenblkif *blkif, struct td_xenblkif_req *req, int err)
+{
+	struct tdtest_config cfg;
+	struct tdtest_line l;
+	bool enabled;
+
+	tdtest_snapshot(blkif->vbd->tdtest, &cfg, &enabled);
+	if (!enabled)
+		return;
+
+	if (!blkif->dead && !tdtest_log_msg_enabled(&cfg, &req->msg))
+		return;
+
+	tdtest_line_ring(&l, err ? "copyin-failed" : "copyin", blkif);
+	tdtest_line_msg(&l, &req->msg);
+	if (err)
+		tdtest_line_add(&l, " err=%d", err);
+	else
+		tdtest_line_crc(&l, req);
+	tdtest_line_emit(&l);
+}
+
+void
+tdtest_copyback(struct td_xenblkif *blkif, struct td_xenblkif_req *req,
+		int err)
+{
+	struct tdtest_config cfg;
+	struct tdtest_line l;
+	bool enabled;
+
+	tdtest_snapshot(blkif->vbd->tdtest, &cfg, &enabled);
+	if (!enabled || !tdtest_log_msg_enabled(&cfg, &req->msg))
+		return;
+
+	tdtest_line_ring(&l, err ? "copyback-failed" : "copyback", blkif);
+	tdtest_line_msg(&l, &req->msg);
+	if (err)
+		tdtest_line_add(&l, " err=%d", err);
+	else
+		tdtest_line_crc(&l, req);
+	tdtest_line_emit(&l);
+}
+
+static const char *
+tdtest_rsp_name(int rsp)
+{
+	switch (rsp) {
+	case BLKIF_RSP_OKAY:
+		return "okay";
+	case BLKIF_RSP_ERROR:
+		return "error";
+	case BLKIF_RSP_EOPNOTSUPP:
+		return "eopnotsupp";
+	default:
+		return "none";
+	}
+}
+
+void
+tdtest_complete(struct td_xenblkif *blkif, struct td_xenblkif_req *req,
+		int err, int rsp, int final)
+{
+	struct tdtest_config cfg;
+	struct tdtest_line l;
+	bool enabled;
+
+	tdtest_snapshot(blkif->vbd->tdtest, &cfg, &enabled);
+	if (!enabled || !tdtest_log_msg_enabled(&cfg, &req->msg))
+		return;
+
+	if (rsp == TDTEST_RSP_NONE && req->msg.operation == BLKIF_OP_READ) {
+		tdtest_line_ring(&l, "copyback-skipped-dead", blkif);
+		tdtest_line_msg(&l, &req->msg);
+		tdtest_line_add(&l, " err=%d", err);
+		if (tdtest_req_has_data(req, err))
+			tdtest_line_crc(&l, req);
+		tdtest_line_emit(&l);
+	}
+
+	tdtest_line_ring(&l, "complete", blkif);
+	tdtest_line_msg(&l, &req->msg);
+	tdtest_line_add(&l, " err=%d rsp=%s final=%d", err,
+			tdtest_rsp_name(rsp), final);
+	if (tdtest_req_has_data(req, err))
+		tdtest_line_crc(&l, req);
+	tdtest_line_emit(&l);
+}
+
+void
+tdtest_dead_ring_destroy(struct td_xenblkif *blkif)
+{
+	struct tdtest_config cfg;
+	bool enabled;
+
+	tdtest_snapshot(blkif->vbd->tdtest, &cfg, &enabled);
+	if (!enabled)
+		return;
+
+	tdtest_log_ring("dead-destroy", blkif, NULL);
 }
 
 /*

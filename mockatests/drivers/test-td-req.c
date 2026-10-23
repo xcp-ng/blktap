@@ -106,11 +106,33 @@ tapdisk_server_mem_mode(void)
 
 /* test-only tdtest hooks (td-test.c), inert: no VBD is ever addressed here */
 
+void
+tdtest_copyin(struct td_xenblkif *blkif, struct td_xenblkif_req *req, int err)
+{
+}
+
 bool
 tdtest_read_hold(struct td_xenblkif *blkif, struct td_xenblkif_req *req,
 		int error)
 {
 	return false;
+}
+
+void
+tdtest_copyback(struct td_xenblkif *blkif, struct td_xenblkif_req *req,
+		int err)
+{
+}
+
+void
+tdtest_complete(struct td_xenblkif *blkif, struct td_xenblkif_req *req,
+		int err, int rsp, int final)
+{
+}
+
+void
+tdtest_dead_ring_destroy(struct td_xenblkif *blkif)
+{
 }
 
 /* --- helpers --- */

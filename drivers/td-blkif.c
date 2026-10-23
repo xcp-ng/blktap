@@ -49,6 +49,7 @@
 #include "td-blkif.h"
 #include "td-ctx.h"
 #include "td-req.h"
+#include "td-test.h"
 
 struct td_xenblkif *
 tapdisk_xenblkif_find(const domid_t domid, const int devid)
@@ -349,9 +350,15 @@ tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
         }
 
         pthread_mutex_unlock(&blkif->mutex);
+
+        /* Test-only, see td-test.c */
+        if (unlikely(blkif->vbd->tdtest))
+            tdtest_ring_disconnect(blkif, tapdisk_xenblkif_reqs_pending(blkif));
         return 0;
     } else {
         pthread_mutex_unlock(&blkif->mutex);
+        if (unlikely(blkif->vbd->tdtest))
+            tdtest_ring_disconnect(blkif, 0);
         return tapdisk_xenblkif_destroy(blkif);
     }
 }
@@ -690,6 +697,9 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
 	list_add_tail(&td_blkif->entry_ctx, &td_ctx->blkifs);
 
     DPRINTF("ring %p connected\n", td_blkif);
+
+    if (unlikely(vbd->tdtest))
+        tdtest_ring_connect(td_blkif);
 
     return 0;
 

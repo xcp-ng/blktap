@@ -53,6 +53,9 @@
 
 struct td_test;
 
+/* tdtest_complete() @rsp for a dead ring: no response is published */
+#define TDTEST_RSP_NONE              1
+
 /*
  * Control, from the signalfd handler: @reload is true for SIGRTMIN, false
  * for SIGRTMIN+1. @code and @value are ssi_code and ssi_int.
@@ -62,8 +65,23 @@ void tdtest_signal(bool reload, int code, int32_t value);
 /* VBD teardown */
 void tdtest_vbd_free(td_vbd_t *vbd);
 
+/* td-blkif.c */
+void tdtest_ring_connect(struct td_xenblkif *blkif);
+void tdtest_ring_disconnect(struct td_xenblkif *blkif, int pending);
+
+/* td-ctx.c */
+void tdtest_ring_intake(struct td_xenblkif *blkif,
+		blkif_request_t *reqs[], int n_reqs);
+
 /* td-req.c */
+void tdtest_copyin(struct td_xenblkif *blkif,
+		struct td_xenblkif_req *req, int err);
 bool tdtest_read_hold(struct td_xenblkif *blkif,
 		struct td_xenblkif_req *req, int error);
+void tdtest_copyback(struct td_xenblkif *blkif,
+		struct td_xenblkif_req *req, int err);
+void tdtest_complete(struct td_xenblkif *blkif,
+		struct td_xenblkif_req *req, int err, int rsp, int final);
+void tdtest_dead_ring_destroy(struct td_xenblkif *blkif);
 
 #endif /* __TD_TEST_H__ */
