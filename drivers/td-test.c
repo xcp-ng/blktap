@@ -57,6 +57,7 @@
 
 #include "debug.h"
 #include "tapdisk.h"
+#include "tapdisk-interface.h"
 #include "tapdisk-server.h"
 #include "tapdisk-vbd.h"
 #include "td-blkif.h"
@@ -69,6 +70,7 @@
 
 #define TDTEST_CONF_DIR         "/run/tapdisk-test"
 #define TDTEST_HOLD_MS_MAX      120000U
+#define TDTEST_XENVBD_PREFIX    "xenvbd-"
 
 #define TDTEST_LOG(_f, _a...)   syslog(LOG_WARNING, "tdtest: " _f, ##_a)
 
@@ -105,8 +107,10 @@ struct td_test {
 
 	/* holds started since the last accepted configuration */
 	unsigned int            read_holds;
+	unsigned int            write_holds;
 
 	struct list_head        read_held;
+	struct list_head        write_held;
 };
 
 /* A successful read whose completion (copy-back and response) is held. */
@@ -118,6 +122,21 @@ struct tdtest_rhold {
 	event_id_t              event;
 	struct timeval          start;
 	unsigned int            ms;
+};
+
+/*
+ * A write that has been issued to the VBD but not yet to the image. Its
+ * sectors are already counted in secs_pending, so pause and close wait.
+ */
+struct tdtest_whold {
+	struct list_head        entry;
+	struct td_test         *td;
+	td_vbd_request_t       *vreq;
+	event_id_t              event;
+	struct timeval          start;
+	unsigned int            ms;
+	int                     n;
+	td_request_t            treqs[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 };
 
 /*
@@ -915,8 +934,182 @@ tdtest_read_hold(struct td_xenblkif *blkif, struct td_xenblkif_req *req,
 }
 
 /*
+ * Write holds
+ */
+
+static void
+tdtest_log_whold(const char *ev, struct tdtest_whold *h, const char *extra)
+{
+	struct td_xenblkif *blkif = h->vreq->token;
+	struct td_xenblkif_req *req;
+	struct tdtest_line l;
+
+	req = container_of(h->vreq, struct td_xenblkif_req, vreq);
+
+	tdtest_line_ring(&l, ev, blkif);
+	tdtest_line_msg(&l, &req->msg);
+	tdtest_line_add(&l, " kind=write hold_ms=%u held_ms=%ld",
+			h->ms, tdtest_elapsed_ms(&h->start));
+	tdtest_line_crc(&l, req);
+	if (extra)
+		tdtest_line_add(&l, " %s", extra);
+	tdtest_line_emit(&l);
+}
+
+/*
+ * Runs in the main thread, without locks held, as
+ * tapdisk_vbd_issue_request() does when it queues writes. The request can
+ * complete as soon as its last iov is queued, so it is not touched after
+ * that.
+ */
+static void
+tdtest_write_release(event_id_t id, char mode __attribute__((unused)),
+		void *private)
+{
+	struct tdtest_whold *h = private;
+	struct td_test *td = h->td;
+	int i;
+
+	tapdisk_server_unregister_event(id);
+
+	pthread_mutex_lock(&td->lock);
+	list_del(&h->entry);
+	pthread_mutex_unlock(&td->lock);
+
+	tdtest_log_whold("release", h, NULL);
+
+	for (i = 0; i < h->n; i++)
+		td_queue_write(h->treqs[i].image, h->treqs[i]);
+
+	free(h);
+}
+
+/*
+ * Called by tapdisk_vbd_issue_request() for a write, before it queues the
+ * iovs. Returns a hold to which all iovs of the request must then be added
+ * with tdtest_write_hold_add(), instead of being queued; or NULL to issue
+ * the request normally. The timer cannot fire before the caller returns
+ * to the main loop.
+ */
+struct tdtest_whold *
+tdtest_write_hold_begin(td_vbd_t *vbd, td_vbd_request_t *vreq)
+{
+	struct td_test *td = vbd->tdtest;
+	struct tdtest_whold *h;
+	struct timeval timeout;
+	event_id_t event;
+	uint64_t nsect = 0;
+	unsigned int ms;
+	int i;
+
+	if (vreq->op != TD_OP_WRITE || !vreq->name ||
+	    strncmp(vreq->name, TDTEST_XENVBD_PREFIX,
+		    strlen(TDTEST_XENVBD_PREFIX)))
+		return NULL;
+
+	if (vreq->iovcnt <= 0 ||
+	    vreq->iovcnt > BLKIF_MAX_SEGMENTS_PER_REQUEST)
+		return NULL;
+
+	/* the mirror request has already been queued */
+	if (vbd->secondary_mode == TD_VBD_SECONDARY_MIRROR)
+		return NULL;
+
+	for (i = 0; i < vreq->iovcnt; i++)
+		nsect += vreq->iov[i].secs;
+
+	pthread_mutex_lock(&td->lock);
+
+	ms = td->cfg.write_hold_ms;
+	if (!td->enabled || !ms ||
+	    (td->cfg.write_hold_max &&
+	     td->write_holds >= td->cfg.write_hold_max) ||
+	    !tdtest_in_window(vreq->sec, nsect,
+			      td->cfg.write_hold_lba_start,
+			      td->cfg.write_hold_lba_end)) {
+		pthread_mutex_unlock(&td->lock);
+		return NULL;
+	}
+
+	h = calloc(1, sizeof(*h));
+	if (!h) {
+		pthread_mutex_unlock(&td->lock);
+		return NULL;
+	}
+
+	h->td = td;
+	h->vreq = vreq;
+	h->ms = ms;
+	h->n = 0;
+	gettimeofday(&h->start, NULL);
+
+	timeout.tv_sec = ms / 1000;
+	timeout.tv_usec = (ms % 1000) * 1000;
+	event = tapdisk_server_register_event(SCHEDULER_POLL_TIMEOUT, -1,
+			timeout, tdtest_write_release, h);
+	if (event < 0) {
+		pthread_mutex_unlock(&td->lock);
+		free(h);
+		return NULL;
+	}
+
+	h->event = event;
+	td->write_holds++;
+	list_add_tail(&h->entry, &td->write_held);
+
+	pthread_mutex_unlock(&td->lock);
+
+	tdtest_log_whold("hold", h, NULL);
+
+	return h;
+}
+
+void
+tdtest_write_hold_add(struct tdtest_whold *h, td_request_t treq)
+{
+	if (unlikely(h->n >= BLKIF_MAX_SEGMENTS_PER_REQUEST)) {
+		/* cannot happen, see tdtest_write_hold_begin; don't lose it */
+		td_queue_write(treq.image, treq);
+		return;
+	}
+
+	h->treqs[h->n++] = treq;
+}
+
+/*
  * VBD teardown
  */
+
+/*
+ * At the start of tapdisk_vbd_close_vdi(), before the images and the stats
+ * are released. Normally nothing is held here: pause and shutdown only
+ * close the images once pending_requests is empty, and a held write stays
+ * there. A forced shutdown can get here with held writes, so fail them
+ * now, while their images are still valid.
+ */
+void
+tdtest_vbd_close_vdi(td_vbd_t *vbd)
+{
+	struct td_test *td = vbd->tdtest;
+	struct tdtest_whold *h, *next;
+	struct list_head list;
+	int i;
+
+	INIT_LIST_HEAD(&list);
+
+	pthread_mutex_lock(&td->lock);
+	list_splice(&td->write_held, &list);
+	INIT_LIST_HEAD(&td->write_held);
+	pthread_mutex_unlock(&td->lock);
+
+	list_for_each_entry_safe(h, next, &list, entry) {
+		tapdisk_server_unregister_event(h->event);
+		tdtest_log_whold("release-cancelled", h, "reason=close-vdi");
+		for (i = 0; i < h->n; i++)
+			td_complete_request(h->treqs[i], -EIO);
+		free(h);
+	}
+}
 
 /*
  * From tapdisk_vbd_free(). Cancels the timers of held requests so that they
@@ -928,6 +1121,7 @@ tdtest_vbd_free(td_vbd_t *vbd)
 {
 	struct td_test *td = vbd->tdtest;
 	struct tdtest_rhold *rh, *rnext;
+	struct tdtest_whold *wh, *wnext;
 	struct tdtest_line l;
 
 	list_for_each_entry_safe(rh, rnext, &td->read_held, entry) {
@@ -938,6 +1132,16 @@ tdtest_vbd_free(td_vbd_t *vbd)
 				(void *)rh->blkif);
 		tdtest_line_emit(&l);
 		free(rh);
+	}
+
+	list_for_each_entry_safe(wh, wnext, &td->write_held, entry) {
+		tapdisk_server_unregister_event(wh->event);
+		list_del(&wh->entry);
+		tdtest_line_init(&l, "release-cancelled", vbd);
+		tdtest_line_add(&l, " ring=%p kind=write reason=vbd-free",
+				wh->vreq->token);
+		tdtest_line_emit(&l);
+		free(wh);
 	}
 
 	pthread_mutex_destroy(&td->lock);
@@ -975,6 +1179,7 @@ tdtest_alloc(td_vbd_t *vbd)
 	td->vbd = vbd;
 	pthread_mutex_init(&td->lock, NULL);
 	INIT_LIST_HEAD(&td->read_held);
+	INIT_LIST_HEAD(&td->write_held);
 	tdtest_config_defaults(&td->cfg);
 
 	return td;
@@ -1014,6 +1219,7 @@ tdtest_reload(td_vbd_t *vbd)
 	td->cfg = cfg;
 	td->enabled = true;
 	td->read_holds = 0;
+	td->write_holds = 0;
 	pthread_mutex_unlock(&td->lock);
 
 	TDTEST_LOG("config minor=%u vdi=%s seq=%s"

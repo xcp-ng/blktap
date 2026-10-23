@@ -52,6 +52,7 @@
 #include "td-req.h"
 
 struct td_test;
+struct tdtest_whold;
 
 /* tdtest_complete() @rsp for a dead ring: no response is published */
 #define TDTEST_RSP_NONE              1
@@ -63,6 +64,7 @@ struct td_test;
 void tdtest_signal(bool reload, int code, int32_t value);
 
 /* VBD teardown */
+void tdtest_vbd_close_vdi(td_vbd_t *vbd);
 void tdtest_vbd_free(td_vbd_t *vbd);
 
 /* td-blkif.c */
@@ -83,5 +85,10 @@ void tdtest_copyback(struct td_xenblkif *blkif,
 void tdtest_complete(struct td_xenblkif *blkif,
 		struct td_xenblkif_req *req, int err, int rsp, int final);
 void tdtest_dead_ring_destroy(struct td_xenblkif *blkif);
+
+/* tapdisk-vbd.c */
+struct tdtest_whold *tdtest_write_hold_begin(td_vbd_t *vbd,
+		td_vbd_request_t *vreq);
+void tdtest_write_hold_add(struct tdtest_whold *hold, td_request_t treq);
 
 #endif /* __TD_TEST_H__ */
