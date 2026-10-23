@@ -273,6 +273,9 @@ tapdisk_vbd_close_vdi(td_vbd_t *vbd)
 {
     int err;
 
+    if (unlikely(vbd->tdtest))
+        tdtest_vbd_close_vdi(vbd);
+
     err = vbd_stats_destroy(vbd);
     if (err) {
         EPRINTF("failed to destroy RRD stats file: %s (error ignored)\n",
@@ -1692,6 +1695,7 @@ tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 	bzero(&treq, sizeof(treq));
 	td_sector_t sec;
 	int i, err;
+	struct tdtest_whold *whold = NULL;
 
 	sec    = vreq->sec;
 	image  = tapdisk_vbd_first_image(vbd);
@@ -1714,6 +1718,10 @@ tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 	if (err) {
 		goto fail;
 	}
+
+	/* Test-only: hold all iovs of this write, see td-test.c */
+	if (unlikely(vbd->tdtest) && vreq->op == TD_OP_WRITE)
+		whold = tdtest_write_hold_begin(vbd, vreq);
 
 	for (i = 0; i < vreq->iovcnt; i++) {
 		struct td_iovec *iov = &vreq->iov[i];
@@ -1760,7 +1768,10 @@ tapdisk_vbd_issue_request(td_vbd_t *vbd, td_vbd_request_t *vreq)
 					queue_mirror_req(vbd, treq);
 			}
 
-			td_queue_write(treq.image, treq);
+			if (unlikely(whold))
+				tdtest_write_hold_add(whold, treq);
+			else
+				td_queue_write(treq.image, treq);
 			break;
 
 		case TD_OP_READ:
