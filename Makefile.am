@@ -12,6 +12,7 @@ SUBDIRS += drivers
 SUBDIRS += include
 SUBDIRS += tapback
 SUBDIRS += cbt
+SUBDIRS += tools
 SUBDIRS += mockatests
 
 dist_doc_DATA = README README.md LICENSE CONTRIB MAINTAINERS

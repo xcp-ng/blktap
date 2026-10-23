@@ -79,6 +79,7 @@ drivers/Makefile
 drivers/crypto/Makefile
 include/Makefile
 tapback/Makefile
+tools/Makefile
 mockatests/Makefile
 mockatests/wrappers/Makefile
 mockatests/cbt/Makefile
