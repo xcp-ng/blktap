@@ -135,6 +135,11 @@ tdtest_dead_ring_destroy(struct td_xenblkif *blkif)
 {
 }
 
+void
+tdtest_dead_ring_destroyed(td_vbd_t *vbd)
+{
+}
+
 /* --- helpers --- */
 
 static void

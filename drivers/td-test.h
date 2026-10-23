@@ -90,6 +90,7 @@ void tdtest_copyback(struct td_xenblkif *blkif,
 void tdtest_complete(struct td_xenblkif *blkif,
 		struct td_xenblkif_req *req, int err, int rsp, int final);
 void tdtest_dead_ring_destroy(struct td_xenblkif *blkif);
+void tdtest_dead_ring_destroyed(td_vbd_t *vbd);
 
 /* tapdisk-vbd.c */
 struct tdtest_whold *tdtest_write_hold_begin(td_vbd_t *vbd,

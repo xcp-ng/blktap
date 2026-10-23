@@ -296,7 +296,7 @@ tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
     blkif_request_t **reqs;
     int limit;
 
-    /* Test-only: intake_pause and R2, see td-test.c */
+    /* Test-only: intake_pause, R2 and R3', see td-test.c */
     if (unlikely(blkif->vbd->tdtest) && tdtest_ring_blocked(blkif))
         return 0;
 

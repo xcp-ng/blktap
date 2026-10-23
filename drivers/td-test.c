@@ -63,6 +63,7 @@
 #include "td-blkif.h"
 #include "td-req.h"
 #include "td-test.h"
+#include "timeout-math.h"
 
 #ifndef TDTEST_VARIANT
 #define TDTEST_VARIANT "unknown"
@@ -70,6 +71,7 @@
 
 #define TDTEST_CONF_DIR         "/run/tapdisk-test"
 #define TDTEST_HOLD_MS_MAX      120000U
+#define TDTEST_GATE_POLL_US     100000
 #define TDTEST_XENVBD_PREFIX    "xenvbd-"
 
 #define TDTEST_LOG(_f, _a...)   syslog(LOG_WARNING, "tdtest: " _f, ##_a)
@@ -111,6 +113,8 @@ struct td_test {
 
 	struct list_head        read_held;
 	struct list_head        write_held;
+
+	bool                    gate_closed;
 };
 
 /* A successful read whose completion (copy-back and response) is held. */
@@ -725,6 +729,105 @@ tdtest_kick_dead_rings(td_vbd_t *vbd)
 	}
 }
 
+/* Reopens the gate, if closed, and checks every live ring. */
+static void
+tdtest_gate_open(td_vbd_t *vbd, const char *reason)
+{
+	struct td_test *td = vbd->tdtest;
+	struct td_xenblkif *blkif;
+	struct tdtest_line l;
+	bool was_closed;
+
+	pthread_mutex_lock(&td->lock);
+	was_closed = td->gate_closed;
+	td->gate_closed = false;
+	pthread_mutex_unlock(&td->lock);
+
+	if (!was_closed)
+		return;
+
+	tdtest_line_init(&l, "gate-open", vbd);
+	tdtest_line_add(&l, " reason=%s", reason);
+	tdtest_line_emit(&l);
+
+	list_for_each_entry(blkif, &vbd->rings, entry)
+		if (blkif->chkrng_event >= 0)
+			tapdisk_xenblkif_sched_chkrng(blkif);
+}
+
+/* Is a write of one of this VBD's dead rings still in the VBD queues? */
+static bool
+tdtest_dead_writes_pending(td_vbd_t *vbd)
+{
+	struct list_head *lists[4];
+	td_vbd_request_t *vreq;
+	struct td_xenblkif *dead;
+	bool found = false;
+	int i;
+
+	if (list_empty(&vbd->dead_rings))
+		return false;
+
+	lists[0] = &vbd->new_requests;
+	lists[1] = &vbd->pending_requests;
+	lists[2] = &vbd->failed_requests;
+	lists[3] = &vbd->completed_requests;
+
+	pthread_mutex_lock(&vbd->mutex);
+	for (i = 0; i < 4 && !found; i++) {
+		list_for_each_entry(vreq, lists[i], next) {
+			if (vreq->op != TD_OP_WRITE)
+				continue;
+			list_for_each_entry(dead, &vbd->dead_rings, entry)
+				if (vreq->token == (void *)dead) {
+					found = true;
+					break;
+				}
+			if (found)
+				break;
+		}
+	}
+	pthread_mutex_unlock(&vbd->mutex);
+
+	return found;
+}
+
+/*
+ * R3': the gate is closed for the live rings while a dead ring of the same
+ * VBD still has a write in the VBD queues. While closed, the ring is
+ * re-checked every TDTEST_GATE_POLL_US, in addition to the explicit check
+ * when the last dead ring is destroyed.
+ */
+static bool
+tdtest_gate_check(td_vbd_t *vbd, struct td_xenblkif *blkif)
+{
+	struct td_test *td = vbd->tdtest;
+	bool closed, was_closed;
+
+	closed = tdtest_dead_writes_pending(vbd);
+
+	pthread_mutex_lock(&td->lock);
+	was_closed = td->gate_closed;
+	td->gate_closed = closed;
+	pthread_mutex_unlock(&td->lock);
+
+	if (closed && !was_closed)
+		tdtest_log_ring("gate-close", blkif, "reason=dead-ring-writes");
+	else if (!closed && was_closed) {
+		struct tdtest_line l;
+
+		tdtest_line_init(&l, "gate-open", vbd);
+		tdtest_line_add(&l, " reason=dead-ring-writes-done");
+		tdtest_line_emit(&l);
+	}
+
+	if (closed && blkif->chkrng_event >= 0)
+		tapdisk_server_event_set_timeout(blkif->chkrng_event,
+				TV_USECS(TDTEST_GATE_POLL_US));
+
+	return closed;
+}
+
 bool
 tdtest_ring_blocked(struct td_xenblkif *blkif)
 {
@@ -749,6 +852,9 @@ tdtest_ring_blocked(struct td_xenblkif *blkif)
 		}
 		return true;
 	}
+
+	if (cfg.fix_gate_new_ring)
+		return tdtest_gate_check(vbd, blkif);
 
 	return false;
 }
@@ -944,6 +1050,20 @@ tdtest_dead_ring_destroy(struct td_xenblkif *blkif)
 		return;
 
 	tdtest_log_ring("dead-destroy", blkif, NULL);
+}
+
+/*
+ * After a dead ring was destroyed, @vbd being the VBD it belonged to. When
+ * that was the last dead ring, reopen the gate with a ring check on every
+ * live ring.
+ */
+void
+tdtest_dead_ring_destroyed(td_vbd_t *vbd)
+{
+	if (tapdisk_vbd_contains_dead_rings(vbd))
+		return;
+
+	tdtest_gate_open(vbd, "dead-rings-destroyed");
 }
 
 /*
@@ -1293,6 +1413,7 @@ tdtest_disable(td_vbd_t *vbd, const char *reason)
 	pthread_mutex_unlock(&td->lock);
 
 	tdtest_unpause_rings(vbd);
+	tdtest_gate_open(vbd, reason);
 
 	TDTEST_LOG("off minor=%u seq=%s reason=%s", vbd->uuid, seq, reason);
 }
@@ -1376,6 +1497,9 @@ tdtest_reload(td_vbd_t *vbd)
 		tdtest_pause_rings(vbd);
 	else
 		tdtest_unpause_rings(vbd);
+
+	if (!cfg.fix_gate_new_ring)
+		tdtest_gate_open(vbd, "config");
 
 	if (cfg.dead_chkrng_kick)
 		tdtest_kick_dead_rings(vbd);

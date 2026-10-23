@@ -593,6 +593,8 @@ tapdisk_xenblkif_complete_request(struct td_xenblkif * const blkif,
 			tdtest_dead_ring_destroy(blkif);
 		pthread_mutex_unlock(&blkif->mutex);
 		tapdisk_xenblkif_destroy(blkif);
+		if (unlikely(vbd->tdtest))
+			tdtest_dead_ring_destroyed(vbd);
 		blkif_destroyed = true;
 		lock = false; /* blkif with its mutex were destroyed above so don't try to unlock it */
 	}
