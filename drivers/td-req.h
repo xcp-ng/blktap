@@ -125,6 +125,8 @@ tapdisk_xenblkif_reqs_init(struct td_xenblkif *td_blkif);
 void
 tapdisk_xenblkif_reqs_free(struct td_xenblkif * const blkif);
 
+void tapdisk_xenblkif_cancel_completion_delay(td_vbd_t *vbd);
+
 #define msg_to_tapreq(_req) \
 	container_of(_req, struct td_xenblkif_req, msg)
 

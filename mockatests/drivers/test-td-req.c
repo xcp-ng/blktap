@@ -51,6 +51,14 @@
 unsigned int PAGE_SIZE;
 unsigned int PAGE_SHIFT;
 
+void
+__tlog_write(int level, const char *fmt, ...)
+{
+	(void)level;
+	(void)fmt;
+}
+
+
 event_id_t
 tapdisk_server_register_event(char m, int fd, struct timeval t,
 		event_cb_t cb, void *p)
