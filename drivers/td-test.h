@@ -56,6 +56,7 @@ struct tdtest_whold;
 
 /* td_xenblkif.tdtest_flags */
 #define TDTEST_RING_PAUSED           0x1 /* intake_pause=current */
+#define TDTEST_RING_BLOCK_LOGGED     0x2 /* R2 block logged once */
 
 /* tdtest_complete() @rsp for a dead ring: no response is published */
 #define TDTEST_RSP_NONE              1

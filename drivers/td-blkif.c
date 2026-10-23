@@ -351,7 +351,7 @@ tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
 
         pthread_mutex_unlock(&blkif->mutex);
 
-        /* Test-only, see td-test.c */
+        /* Test-only, may stop dead-ring intake (R2), see td-test.c */
         if (unlikely(blkif->vbd->tdtest))
             tdtest_ring_disconnect(blkif, tapdisk_xenblkif_reqs_pending(blkif));
         return 0;

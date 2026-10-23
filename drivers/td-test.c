@@ -728,8 +728,27 @@ tdtest_kick_dead_rings(td_vbd_t *vbd)
 bool
 tdtest_ring_blocked(struct td_xenblkif *blkif)
 {
+	td_vbd_t *vbd = blkif->vbd;
+	struct tdtest_config cfg;
+	bool enabled;
+
 	if (blkif->tdtest_flags & TDTEST_RING_PAUSED)
 		return true;
+
+	tdtest_snapshot(vbd->tdtest, &cfg, &enabled);
+	if (!enabled)
+		return false;
+
+	if (blkif->dead) {
+		/* R2 */
+		if (!cfg.fix_dead_intake)
+			return false;
+		if (!(blkif->tdtest_flags & TDTEST_RING_BLOCK_LOGGED)) {
+			blkif->tdtest_flags |= TDTEST_RING_BLOCK_LOGGED;
+			tdtest_log_ring("dead-intake-blocked", blkif, NULL);
+		}
+		return true;
+	}
 
 	return false;
 }
@@ -776,7 +795,13 @@ tdtest_ring_connect(struct td_xenblkif *blkif)
 /*
  * Called by tapdisk_xenblkif_disconnect, after the ring has been made dead
  * if @pending, or before it is destroyed otherwise.
- */
+ *
+ * R2 (fix_dead_intake): a dead ring stops polling the shared ring. Its
+ * chkrng and stoppolling events are unregistered and set to -1, so that
+ * tapdisk_xenblkif_destroy() does not unregister them again. If the ring
+ * was polling, the evtchn event it masked (shared by its context) is
+ * unmasked, because its stoppolling event will now never do that.
+*/
 void
 tdtest_ring_disconnect(struct td_xenblkif *blkif, int pending)
 {
@@ -791,6 +816,32 @@ tdtest_ring_disconnect(struct td_xenblkif *blkif, int pending)
 	tdtest_line_ring(&l, "disconnect", blkif);
 	tdtest_line_add(&l, " pending=%d", pending);
 	tdtest_line_emit(&l);
+
+	if (!pending || !blkif->dead || !cfg.fix_dead_intake)
+		return;
+
+	tdtest_line_ring(&l, "r2-unregister", blkif);
+	tdtest_line_add(&l, " chkrng=%d stoppolling=%d polling=%d",
+			blkif->chkrng_event, blkif->stoppolling_event,
+			blkif->in_polling ? 1 : 0);
+	tdtest_line_emit(&l);
+
+	if (blkif->chkrng_event >= 0) {
+		tapdisk_server_unregister_event(blkif->chkrng_event);
+		blkif->chkrng_event = -1;
+	}
+
+	if (blkif->stoppolling_event >= 0) {
+		tapdisk_server_unregister_event(blkif->stoppolling_event);
+		blkif->stoppolling_event = -1;
+	}
+
+	if (blkif->in_polling) {
+		blkif->in_polling = false;
+		if (blkif->ctx)
+			tapdisk_server_mask_event(
+					tapdisk_xenblkif_evtchn_event_id(blkif), 0);
+	}
 }
 
 void
