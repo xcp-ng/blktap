@@ -125,7 +125,13 @@ tapdisk_xenblkif_reqs_init(struct td_xenblkif *td_blkif);
 void
 tapdisk_xenblkif_reqs_free(struct td_xenblkif * const blkif);
 
-void tapdisk_xenblkif_cancel_completion_delay(td_vbd_t *vbd);
+/**
+ * Test-only: completes a read held by tdtest_read_hold(), see td-test.c.
+ * Must be called with the VBD's mutex held.
+ */
+void
+tapdisk_xenblkif_complete_held_read(struct td_xenblkif * const blkif,
+        struct td_xenblkif_req * const req);
 
 #define msg_to_tapreq(_req) \
 	container_of(_req, struct td_xenblkif_req, msg)

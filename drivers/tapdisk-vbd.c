@@ -60,7 +60,7 @@
 #include "tapdisk-storage.h"
 #include "tapdisk-nbdserver.h"
 #include "td-stats.h"
-#include "td-req.h"
+#include "td-test.h"
 #include "tapdisk-utils.h"
 #include "timeout-math.h"
 
@@ -854,7 +854,8 @@ tapdisk_vbd_shutdown(td_vbd_t *vbd)
 void
 tapdisk_vbd_free(td_vbd_t *vbd)
 {
-	tapdisk_xenblkif_cancel_completion_delay(vbd);
+	if (unlikely(vbd->tdtest))
+		tdtest_vbd_free(vbd);
 	pthread_mutex_destroy(&vbd->mutex);
 	free(vbd->name);
 	free(vbd->encryption.encryption_key);
