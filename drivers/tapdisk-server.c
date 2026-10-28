@@ -30,6 +30,7 @@
 #include <sys/signalfd.h>
 #ifdef HAVE_EVENTFD
 #include <sys/eventfd.h>
+#include <sys/prctl.h>
 #else
 #include <sys/syscall.h>
 #endif
@@ -52,6 +53,13 @@
 
 #define DBG(_level, _f, _a...)       tlog_write(_level, _f, ##_a)
 #define ERR(_err, _f, _a...)         tlog_error(_err, _f, ##_a)
+
+/*
+ * Timer slack of the IO threads, in nanoseconds. select() may return up to
+ * the slack of the thread after its timeout (50 us by default), too late for
+ * the deferred kick deadline (80 us by default).
+ */
+#define TAPDISK_IO_THREAD_TIMER_SLACK_NS 5000
 
 #define TAPDISK_TIOCBS_PER_QUEUE    (MAX_REQUESTS * BLKIF_MAX_SEGMENTS_PER_REQUEST + 50)
 
@@ -637,6 +645,8 @@ static void*
 __tapdisk_io_thread_run(void* arg)
 {
 	td_queue_id_t  qid = (unsigned long)arg;
+
+	prctl(PR_SET_TIMERSLACK, TAPDISK_IO_THREAD_TIMER_SLACK_NS);
 
 	while (atomic_load(&server.run))
 		tapdisk_io_iterate(qid);
