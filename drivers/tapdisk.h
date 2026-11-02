@@ -237,7 +237,7 @@ struct tap_disk {
 	void (*td_queue_write)       (td_driver_t *, td_request_t);
 	void (*td_debug)             (td_driver_t *);
 	void (*td_stats)             (td_driver_t *, td_stats_t *);
-	int (*td_commit)             (td_driver_t *, const char *);
+	int (*td_commit)             (td_driver_t *, const char *, uint64_t);
 	int (*td_query_commit_job)   (td_driver_t *, td_query_t *);
 	int (*td_cancel_commit_job)  (td_driver_t *, bool);
 

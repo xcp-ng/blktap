@@ -147,7 +147,7 @@ int tap_ctl_blk_major(void);
 /**
  * Commit a VBD.
  */
-int tap_ctl_commit(const int id, const int minor, const char *params);
+int tap_ctl_commit(const int id, const int minor, const char *params, uint64_t speed);
 int tap_ctl_query_commit_job(const int id, const int minor);
 int tap_ctl_cancel_commit_job(const int id, const int minor, bool wait);
 

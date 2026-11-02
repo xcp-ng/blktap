@@ -1398,10 +1398,10 @@ tapdisk_control_commit(struct tapdisk_ctl_conn *conn,
 		goto out;
 	}
 
-	if (request->u.params.path[0])
-		desc = request->u.params.path;
+	if (request->u.commit.path[0])
+		desc = request->u.commit.path;
 
-	err = tapdisk_vbd_commit(vbd, desc);
+	err = tapdisk_vbd_commit(vbd, desc, request->u.commit.speed);
 out:
 	response->cookie = request->cookie;
 	if (!err)

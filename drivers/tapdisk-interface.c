@@ -271,7 +271,7 @@ fail:
 }
 
 int
-td_commit(td_image_t *image, const char *name)
+td_commit(td_image_t *image, const char *name, uint64_t speed)
 {
 	td_driver_t *driver;
 
@@ -292,7 +292,7 @@ td_commit(td_image_t *image, const char *name)
 		return -EOPNOTSUPP;
 	}
 
-	return driver->ops->td_commit(driver, name);
+	return driver->ops->td_commit(driver, name, speed);
 }
 
 int

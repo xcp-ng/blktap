@@ -116,7 +116,10 @@ struct qcow2_request {
 		/* OP_READ, OP_WRITE */
 		td_request_t        treq;
 		/* OP_COMMIT */
-		char *              top;
+		struct {
+			char *      top;
+			uint64_t    speed;
+		};
 		/* OP_CANCEL_COMMIT */
 		bool                sync;
 	};
@@ -970,7 +973,7 @@ qcow2_queue_write(td_driver_t *driver, td_request_t treq)
 }
 
 int
-qcow2_commit(td_driver_t *driver, const char *name)
+qcow2_commit(td_driver_t *driver, const char *name, uint64_t speed)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
 	struct qcow2_request *req;
@@ -979,13 +982,14 @@ qcow2_commit(td_driver_t *driver, const char *name)
 	if (name == NULL)
 		return -EINVAL;
 
-	DBG(TLOG_WARN, "Qcow2: commit %s.\n", name);
+	DBG(TLOG_WARN, "Qcow2: commit %s, speed %"PRIu64".\n", name, speed);
 
 	req = alloc_qcow2_request(s);
 	if (!req)
 		return -EBUSY;
 
 	req->top   = strdup(name);
+	req->speed = speed;
 	req->op    = QCOW2_OP_COMMIT;
 	req->done  = false;
 
@@ -1037,8 +1041,12 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 	DBG(TLOG_DBG, "Qcow2: block commit %s (node-name: '%s').\n", req->top, node);
 	DBG(TLOG_DBG, "Qcow2: block commit: top-node: '%s' on '%s' base-node).\n", top_node, base_node);
 
+	/*
+	 * Without a speed, the job copies as fast as the storage allows and
+	 * the guest I/O wait behind it.
+	 */
 	qmp_block_commit(COMMIT_JOB_ID, node, base_node, NULL, top_node, NULL, NULL,
-		false, false, false, 0, false, BLOCKDEV_ON_ERROR_REPORT,
+		false, false, req->speed != 0, req->speed, false, BLOCKDEV_ON_ERROR_REPORT,
 		NULL, true, true, true, false, &local_err);
 
 	if (local_err) {

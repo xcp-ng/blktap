@@ -43,7 +43,7 @@
 #include "util.h"
 
 int
-tap_ctl_commit(const int id, const int minor, const char *params)
+tap_ctl_commit(const int id, const int minor, const char *params, uint64_t speed)
 {
 	int err;
 	tapdisk_message_t message;
@@ -53,8 +53,9 @@ tap_ctl_commit(const int id, const int minor, const char *params)
 	message.cookie = minor;
 
 	if (params)
-		safe_strncpy(message.u.params.path, params,
-			     sizeof(message.u.params.path));
+		safe_strncpy(message.u.commit.path, params,
+			     sizeof(message.u.commit.path));
+	message.u.commit.speed = speed;
 
 	err = tap_ctl_connect_send_and_receive(id, &message, NULL);
 	if (err)

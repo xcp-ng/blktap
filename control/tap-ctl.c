@@ -32,6 +32,8 @@
 #include "config.h"
 #endif
 
+#include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1003,10 +1005,47 @@ usage:
 	return td_err_set_errno(error, EINVAL);
 }
 
+static int
+parse_speed(const char *str, uint64_t *speed)
+{
+	unsigned long long value;
+	unsigned int shift = 0;
+	char *end;
+
+	errno = 0;
+	value = strtoull(str, &end, 10);
+	if (errno || end == str)
+		return -EINVAL;
+
+	switch (*end) {
+	case 'K':
+		shift = 10;
+		break;
+	case 'M':
+		shift = 20;
+		break;
+	case 'G':
+		shift = 30;
+		break;
+	}
+	if (shift)
+		end++;
+	if (*end)
+		return -EINVAL;
+
+	/* QEMU takes an int64_t */
+	if (value > (unsigned long long)INT64_MAX >> shift)
+		return -ERANGE;
+
+	*speed = value << shift;
+	return 0;
+}
+
 static void
 tap_cli_commit_usage(FILE *stream)
 {
-	fprintf(stream, "usage: commit <-p pid> <-m minor> <-a /path/to/file>\n");
+	fprintf(stream, "usage: commit <-p pid> <-m minor> <-a /path/to/file> "
+		"[-s speed in bytes per second, with an optional K, M or G suffix]\n");
 }
 
 int
@@ -1014,14 +1053,16 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 {
 	const char *args;
 	int c, pid, minor, err;
+	uint64_t speed;
 
 	pid   = -1;
 	minor = -1;
 	args  = NULL;
+	speed = 0;
 	td_err_init_errno(error);
 
 	optind = 0;
-	while ((c = getopt(argc, argv, "p:m:a:h")) != -1) {
+	while ((c = getopt(argc, argv, "p:m:a:s:h")) != -1) {
 		switch (c) {
 		case 'p':
 			pid = atoi(optarg);
@@ -1031,6 +1072,10 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 			break;
 		case 'a':
 			args = optarg;
+			break;
+		case 's':
+			if (parse_speed(optarg, &speed))
+				goto usage;
 			break;
 		case '?':
 			goto usage;
@@ -1043,7 +1088,7 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 	if (pid == -1 || minor == -1 || args == NULL)
 		goto usage;
 
-	err = tap_ctl_commit(pid, minor, args);
+	err = tap_ctl_commit(pid, minor, args, speed);
 	if (!err)
 		return td_err_set_success(error);
 	return td_err_set_errno(error, err);
