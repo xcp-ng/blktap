@@ -1151,15 +1151,16 @@ resume_failed:
 }
 
 int
-tapdisk_vbd_commit(td_vbd_t *vbd, const char *name, uint64_t speed)
+tapdisk_vbd_commit(td_vbd_t *vbd, const char *name, uint64_t speed,
+		   unsigned int percent)
 {
 	int err;
 
 	if (log) {
-		INFO("commit %s, speed %"PRIu64"\n", name, speed);
+		INFO("commit %s, speed %"PRIu64", percent %u\n", name, speed, percent);
 	}
 
-	err = td_commit(tapdisk_vbd_first_non_log_image(vbd), name, speed);
+	err = td_commit(tapdisk_vbd_first_non_log_image(vbd), name, speed, percent);
 
 	INFO("commit started (%d)\n", err);
 

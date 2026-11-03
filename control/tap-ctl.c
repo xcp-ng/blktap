@@ -1045,7 +1045,8 @@ static void
 tap_cli_commit_usage(FILE *stream)
 {
 	fprintf(stream, "usage: commit <-p pid> <-m minor> <-a /path/to/file> "
-		"[-s speed in bytes per second, with an optional K, M or G suffix]\n");
+		"[-s speed in bytes per second, with an optional K, M or G suffix | "
+		"-P percent of the estimated bandwidth reserved to the guest]\n");
 }
 
 int
@@ -1054,15 +1055,18 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 	const char *args;
 	int c, pid, minor, err;
 	uint64_t speed;
+	unsigned long percent;
+	char *end;
 
 	pid   = -1;
 	minor = -1;
 	args  = NULL;
 	speed = 0;
+	percent = 0;
 	td_err_init_errno(error);
 
 	optind = 0;
-	while ((c = getopt(argc, argv, "p:m:a:s:h")) != -1) {
+	while ((c = getopt(argc, argv, "p:m:a:s:P:h")) != -1) {
 		switch (c) {
 		case 'p':
 			pid = atoi(optarg);
@@ -1077,6 +1081,11 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 			if (parse_speed(optarg, &speed))
 				goto usage;
 			break;
+		case 'P':
+			percent = strtoul(optarg, &end, 10);
+			if (*end || percent < 1 || percent > 100)
+				goto usage;
+			break;
 		case '?':
 			goto usage;
 		case 'h':
@@ -1085,10 +1094,10 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 		}
 	}
 
-	if (pid == -1 || minor == -1 || args == NULL)
+	if (pid == -1 || minor == -1 || args == NULL || (speed && percent))
 		goto usage;
 
-	err = tap_ctl_commit(pid, minor, args, speed);
+	err = tap_ctl_commit(pid, minor, args, speed, percent);
 	if (!err)
 		return td_err_set_success(error);
 	return td_err_set_errno(error, err);

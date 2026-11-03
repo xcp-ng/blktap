@@ -119,6 +119,7 @@ struct qcow2_request {
 		struct {
 			char *      top;
 			uint64_t    speed;
+			unsigned int percent;
 		};
 		/* OP_CANCEL_COMMIT */
 		bool                sync;
@@ -146,6 +147,32 @@ struct io_stat {
 	double S;
 };
 #endif
+
+/*
+ * Adaptive speed of the commit job (tap-ctl commit -P): a share of max_bw,
+ * the estimated bandwidth of the copy, is reserved to the guest. While the
+ * guest does I/O, the copy is limited to the rest of max_bw; without guest
+ * I/O, it runs without limit and max_bw is measured then. Without an estimate yet, the copy runs without limit for the first
+ * period, and max_bw is what the copy and the guest did together. The
+ * estimate is kept for the next commits of the image.
+ */
+#define COMMIT_THROTTLE_PERIOD_MS 200
+#define COMMIT_THROTTLE_MIN_SPEED (1 << 20)
+#define COMMIT_THROTTLE_BW_WEIGHT 8
+
+struct commit_throttle {
+	QEMUTimer                 *timer;
+	unsigned int              percent;
+	bool                      running;
+	int64_t                   last_ms;
+	uint64_t                  last_progress;
+	uint64_t                  last_guest_bytes;
+	/* bytes per second */
+	uint64_t                  max_bw;
+	uint64_t                  speed;
+	bool                      was_idle;
+	unsigned int              periods;
+};
 
 struct qcow2_state {
 	td_driver_t               *driver;
@@ -178,6 +205,9 @@ struct qcow2_state {
 	pthread_mutex_t           commit_lock;
 	pthread_cond_t            commit_cond;
 	JobInfo                   job_info;
+	struct commit_throttle    throttle;
+	/* completed guest I/O, in the thread of QEMU */
+	uint64_t                  guest_bytes;
 
 	/* Stats */
 	uint64_t                  queued;
@@ -508,6 +538,11 @@ qcow2_open(void *opaque)
 	job_unlock();
 
 	blk_set_aio_context(conf->blk, qemu_get_aio_context(), &error_abort);
+
+	if (s->throttle.timer) {
+		timer_free(s->throttle.timer);
+		s->throttle.timer = NULL;
+	}
 
 	blk_drain_all();
 
@@ -845,6 +880,8 @@ static void qcow2_complete(void *opaque, int ret)
 #endif
 
 	s->completed++;
+	if (!req->error)
+		s->guest_bytes += (uint64_t)req->treq.secs << s->blk_shift;
 	TRACE(s);
 
 	switch (req->op) {
@@ -876,6 +913,134 @@ static void qcow2_complete(void *opaque, int ret)
 	}
 }
 
+static uint64_t
+commit_throttle_target(const struct commit_throttle *thr)
+{
+	uint64_t target = thr->max_bw * (100 - thr->percent) / 100;
+
+	return target > COMMIT_THROTTLE_MIN_SPEED ? target : COMMIT_THROTTLE_MIN_SPEED;
+}
+
+static inline uint64_t
+commit_throttle_bw(uint64_t bw, uint64_t measure)
+{
+	/* goes down by 1 / WEIGHT of the gap: quickly if small, slowly if large */
+	if (measure > bw)
+		return measure;
+
+	return (bw * (COMMIT_THROTTLE_BW_WEIGHT - 1) + measure) / COMMIT_THROTTLE_BW_WEIGHT;
+}
+
+/* Called with the job lock held. */
+static void
+commit_throttle_set_speed(struct commit_throttle *thr, BlockJob *bjob, uint64_t speed)
+{
+	Error *local_err = NULL;
+
+	if (speed == thr->speed)
+		return;
+	if (!block_job_set_speed_locked(bjob, speed, &local_err)) {
+		DPRINTF("Qcow2: commit speed error: %s\n", error_get_pretty(local_err));
+		error_free(local_err);
+		return;
+	}
+	thr->speed = speed;
+}
+
+/* Limits the copy as soon as the guest does I/O again, not at the next period. */
+static inline void
+commit_throttle_guest_io(struct qcow2_state *s)
+{
+	struct commit_throttle *thr = &s->throttle;
+	BlockJob *bjob;
+
+	if (!thr->running || thr->speed || !thr->max_bw)
+		return;
+
+	job_lock();
+	bjob = block_job_get_locked(COMMIT_JOB_ID);
+	if (bjob && bjob->job.status == JOB_STATUS_RUNNING) {
+		commit_throttle_set_speed(thr, bjob, commit_throttle_target(thr));
+	}
+	job_unlock();
+}
+
+static void
+commit_throttle_period(void *opaque)
+{
+	struct qcow2_state *s = opaque;
+	struct commit_throttle *thr = &s->throttle;
+	int64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+	int64_t elapsed = now - thr->last_ms > 0 ? now - thr->last_ms : 1;
+	uint64_t copy, guest, speed, progress;
+	BlockJob *bjob;
+	bool idle;
+
+	job_lock();
+	bjob = block_job_get_locked(COMMIT_JOB_ID);
+	if (!bjob || (bjob->job.status != JOB_STATUS_RUNNING &&
+		      bjob->job.status != JOB_STATUS_CREATED)) {
+		/* done (READY: only the guest writes are mirrored), or cancelled */
+		job_unlock();
+		thr->running = false;
+		DPRINTF("Qcow2: commit throttle: end, max %"PRIu64" MiB/s\n", thr->max_bw >> 20);
+		return;
+	}
+
+	progress = bjob->job.progress.current;
+	copy  = (progress - thr->last_progress) * 1000 / elapsed;
+	guest = (s->guest_bytes - thr->last_guest_bytes) * 1000 / elapsed;
+	idle  = s->guest_bytes == thr->last_guest_bytes && s->queued == s->completed;
+
+	if (idle) {
+		/* a whole period without guest I/O nor limit: the copy had all the bandwidth */
+		if (thr->was_idle && !thr->speed && copy)
+			thr->max_bw = commit_throttle_bw(thr->max_bw, copy);
+		speed = 0;
+	} else {
+		if (!thr->max_bw && !thr->speed)
+			thr->max_bw = copy + guest;
+		/*
+		 * Not corrected by the copy rate: when the copy is under its
+		 * speed, the storage is busy with the guest I/O.
+		 */
+		speed = commit_throttle_target(thr);
+	}
+	if (thr->periods % 5 == 0 || (speed == 0) != (thr->speed == 0))
+		DPRINTF("Qcow2: commit throttle: guest %"PRIu64" MiB/s, copy %"PRIu64" MiB/s, "
+			"max %"PRIu64" MiB/s, speed %"PRIu64" -> %"PRIu64" MiB/s\n",
+			guest >> 20, copy >> 20, thr->max_bw >> 20, thr->speed >> 20, speed >> 20);
+	commit_throttle_set_speed(thr, bjob, speed);
+	job_unlock();
+
+	thr->was_idle = idle;
+	thr->last_ms = now;
+	thr->last_progress = progress;
+	thr->last_guest_bytes = s->guest_bytes;
+	thr->periods++;
+	timer_mod(thr->timer, now + COMMIT_THROTTLE_PERIOD_MS);
+}
+
+static void
+commit_throttle_start(struct qcow2_state *s, unsigned int percent)
+{
+	struct commit_throttle *thr = &s->throttle;
+
+	if (!thr->timer)
+		thr->timer = aio_timer_new(s->ctx, QEMU_CLOCK_REALTIME, SCALE_MS,
+					   commit_throttle_period, s);
+	thr->percent = percent;
+	thr->running = true;
+	thr->last_ms = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
+	thr->last_progress = 0;
+	thr->last_guest_bytes = s->guest_bytes;
+	thr->speed = 0;
+	thr->was_idle = false;
+	thr->periods = 0;
+	DPRINTF("Qcow2: commit throttle: start, %u%% for the guest, max %"PRIu64" MiB/s\n", percent, thr->max_bw >> 20);
+	timer_mod(thr->timer, thr->last_ms + COMMIT_THROTTLE_PERIOD_MS);
+}
+
 static inline void
 do_aio_read(struct qcow2_state *s, struct qcow2_request *req)
 {
@@ -889,6 +1054,7 @@ do_aio_read(struct qcow2_state *s, struct qcow2_request *req)
 #endif
 	req->aiocb = blk_aio_preadv(blk, req->treq.sec << s->blk_shift, &req->qiov, 0, qcow2_complete, req);
 
+	commit_throttle_guest_io(s);
 	s->queued++;
 	s->reads++;
 	s->read_size += req->treq.secs;
@@ -908,6 +1074,7 @@ do_aio_write(struct qcow2_state *s, struct qcow2_request *req)
 #endif
 	req->aiocb = blk_aio_pwritev(blk, req->treq.sec << s->blk_shift, &req->qiov, 0, qcow2_complete, req);
 
+	commit_throttle_guest_io(s);
 	s->queued++;
 	s->writes++;
 	s->write_size += req->treq.secs;
@@ -973,7 +1140,7 @@ qcow2_queue_write(td_driver_t *driver, td_request_t treq)
 }
 
 int
-qcow2_commit(td_driver_t *driver, const char *name, uint64_t speed)
+qcow2_commit(td_driver_t *driver, const char *name, uint64_t speed, unsigned int percent)
 {
 	struct qcow2_state *s = (struct qcow2_state *)driver->data;
 	struct qcow2_request *req;
@@ -982,7 +1149,7 @@ qcow2_commit(td_driver_t *driver, const char *name, uint64_t speed)
 	if (name == NULL)
 		return -EINVAL;
 
-	DBG(TLOG_WARN, "Qcow2: commit %s, speed %"PRIu64".\n", name, speed);
+	DBG(TLOG_WARN, "Qcow2: commit %s, speed %"PRIu64", percent %u.\n", name, speed, percent);
 
 	req = alloc_qcow2_request(s);
 	if (!req)
@@ -990,6 +1157,7 @@ qcow2_commit(td_driver_t *driver, const char *name, uint64_t speed)
 
 	req->top   = strdup(name);
 	req->speed = speed;
+	req->percent = percent;
 	req->op    = QCOW2_OP_COMMIT;
 	req->done  = false;
 
@@ -1053,6 +1221,8 @@ do_commit(struct qcow2_state *s, struct qcow2_request *req)
 		DPRINTF("qcow2_commit: error: %s\n", error_get_pretty(local_err));
 		error_free(local_err);
 		err = -EINVAL;
+	} else if (req->percent) {
+		commit_throttle_start(s, req->percent);
 	}
 
 signal_commit:

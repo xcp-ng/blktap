@@ -1401,7 +1401,8 @@ tapdisk_control_commit(struct tapdisk_ctl_conn *conn,
 	if (request->u.commit.path[0])
 		desc = request->u.commit.path;
 
-	err = tapdisk_vbd_commit(vbd, desc, request->u.commit.speed);
+	err = tapdisk_vbd_commit(vbd, desc, request->u.commit.speed,
+				 request->u.commit.percent);
 out:
 	response->cookie = request->cookie;
 	if (!err)

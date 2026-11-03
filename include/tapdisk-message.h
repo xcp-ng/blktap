@@ -91,7 +91,9 @@ struct tapdisk_message_commit {
 	uint32_t                         devnum;
 	uint32_t                         domid;
 	char                             path[TAPDISK_MESSAGE_MAX_PATH_LENGTH];
-	uint64_t                         speed;    /* bytes per second, 0: no limit */
+	uint64_t                         speed;    /* bytes per second, 0 for no limit */
+	uint32_t                         percent;  /* qcow2: share of the bandwidth reserved to the
+						      guest, if 0 use speed */
 };
 
 struct tapdisk_message_image {
