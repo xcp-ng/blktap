@@ -358,13 +358,6 @@ tapdisk_server_io_scheduler_wake(td_queue_id_t qid)
 	tapdisk_server_io_thread_wake(qid);
 }
 
-bool
-tapdisk_server_in_io_thread(td_queue_id_t qid)
-{
-	ASSERT(qid < ARRAY_SIZE(server.io_threads));
-	return pthread_equal(pthread_self(), server.io_threads[qid].tid);
-}
-
 event_id_t
 tapdisk_server_register_io_event(td_queue_id_t qid, char mode, int fd,
 				 struct timeval timeout, event_cb_t cb, void *data)
@@ -479,7 +472,7 @@ tapdisk_server_kick_responses(td_queue_id_t qid)
 	td_vbd_t *vbd, *tmp;
 
 	tapdisk_server_for_each_vbd(vbd, tmp)
-		tapdisk_vbd_kick(&vbd->queues[qid], false);
+		tapdisk_vbd_kick(&vbd->queues[qid]);
 }
 
 static void
