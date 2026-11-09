@@ -212,13 +212,9 @@ out:
 }
 
 
-int
-tapdisk_xenblkif_destroy(struct td_xenblkif * blkif)
+static void
+tapdisk_xenblkif_unregister_events(struct td_xenblkif * blkif)
 {
-    int err;
-
-    ASSERT(blkif);
-
     if (tapdisk_xenblkif_chkrng_event_id(blkif) >= 0) {
         tapdisk_server_unregister_event(
 				tapdisk_xenblkif_chkrng_event_id(blkif));
@@ -230,6 +226,17 @@ tapdisk_xenblkif_destroy(struct td_xenblkif * blkif)
 				tapdisk_xenblkif_stoppolling_event_id(blkif));
         blkif->stoppolling_event = -1;
     }
+}
+
+
+int
+tapdisk_xenblkif_destroy(struct td_xenblkif * blkif)
+{
+    int err;
+
+    ASSERT(blkif);
+
+    tapdisk_xenblkif_unregister_events(blkif);
 
     tapdisk_xenblkif_reqs_free(blkif);
 
@@ -321,6 +328,25 @@ tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
          * in tapdisk? IIUC if we don't unmap it we'll get errors during grant
          * copy.
          */
+
+        /*
+         * As tapdisk_xenblkif_destroy(), unregister chkrng and stoppolling
+         * events.
+         */
+        tapdisk_xenblkif_unregister_events(blkif);
+
+        /*
+         * If the ring was polling, the event channel event it masked is
+         * shared with the other rings of the context, including a ring
+         * reconnected later. The stoppolling event would have unmasked it,
+         * so do it here.
+         */
+        if (blkif->in_polling) {
+            blkif->in_polling = false;
+            if (blkif->ctx)
+                tapdisk_server_mask_event(
+                        tapdisk_xenblkif_evtchn_event_id(blkif), 0);
+        }
 
         pthread_mutex_unlock(&blkif->mutex);
         return 0;
