@@ -292,6 +292,7 @@ tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
     if (!blkif)
         return -ENODEV;
 
+    pthread_mutex_lock(&blkif->mutex);
     if (tapdisk_xenblkif_reqs_pending(blkif)) {
         RING_DEBUG(blkif, "disconnect from ring with %d pending requests\n",
                 blkif->ring_size - blkif->n_reqs_free);
@@ -320,9 +321,13 @@ tapdisk_xenblkif_disconnect(const domid_t domid, const int devid)
          * in tapdisk? IIUC if we don't unmap it we'll get errors during grant
          * copy.
          */
+
+        pthread_mutex_unlock(&blkif->mutex);
         return 0;
-	} else
+    } else {
+        pthread_mutex_unlock(&blkif->mutex);
         return tapdisk_xenblkif_destroy(blkif);
+    }
 }
 
 

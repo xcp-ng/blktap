@@ -295,7 +295,17 @@ tapdisk_xenio_ctx_process_ring(struct td_xenblkif *blkif,
     blkif_request_t **reqs;
     int limit;
 
+    /*
+     * Do not take requests off a dead ring: its frontend has closed it, and
+     * the grants of whatever it left on the shared ring may have been
+     * revoked or reissued.
+     */
     pthread_mutex_lock(&blkif->mutex);
+    if (unlikely(blkif->dead)) {
+        pthread_mutex_unlock(&blkif->mutex);
+        return 0;
+    }
+
     start = blkif->n_reqs_free;
 
     if (unlikely(blkif->barrier.msg)) {
