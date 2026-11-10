@@ -522,6 +522,19 @@ tapdisk_xenblkif_connect(domid_t domid, int devid, const grant_ref_t * grefs,
         return -EALREADY;
     }
 
+    /*
+     * A dead ring of this VBD still has requests in flight. Requests of a new
+     * ring would not be ordered against them: a write of the dead ring could
+     * land after a newer write to the same sectors, and a flush on the new
+     * ring would not wait for it. Refuse the connection until the dead rings
+     * are gone; tapback retries it.
+     */
+    if (tapdisk_vbd_contains_dead_rings(vbd)) {
+        DPRINTF("refusing to connect domid=%d, devid=%d: a dead ring of the "
+                "VBD still has requests in flight\n", domid, devid);
+        return -EBUSY;
+    }
+
     err = tapdisk_xenio_ctx_get(pool, &td_ctx);
     if (err) {
         /* TODO log error */
