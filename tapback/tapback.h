@@ -268,6 +268,13 @@ typedef struct vbd {
     bool connected;
 
     /**
+     * Indicates that the tapdisk refused to connect to the shared ring because
+     * a previous ring of the VBD still has requests in flight, and that the
+     * connection must be retried.
+     */
+    bool connect_retry;
+
+    /**
      * Descriptor of the tapdisk process serving this virtual block device. We
      * need this until the end of the VBD's lifetime in order to disconnect
      * the tapdisk from the shared ring.
@@ -510,6 +517,25 @@ xenbus_switch_state(vbd_t * const device, const XenbusState state);
  */
 int
 frontend_changed(vbd_t * const device, const XenbusState state);
+
+/**
+ * How often the connection of a VBD whose tapdisk refused it is retried, in
+ * milliseconds.
+ */
+#define TAPBACK_CONNECT_RETRY_MS    100
+
+/**
+ * Tells whether a VBD of this back-end waits for its connection to be retried.
+ */
+bool
+tapback_backend_connect_retry_pending(backend_t *backend);
+
+/**
+ * Retries the connection of each VBD of this back-end whose tapdisk refused
+ * it.
+ */
+void
+tapback_backend_retry_connect(backend_t *backend);
 
 /**
  * Returns the current domain ID or -errno.
