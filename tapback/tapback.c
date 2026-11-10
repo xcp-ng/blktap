@@ -448,14 +448,26 @@ tapback_backend_run(backend_t *backend)
     do {
         fd_set rfds;
         int nfds = 0;
+        struct timeval tv, *timeout = NULL;
 
         FD_ZERO(&rfds);
         FD_SET(fd, &rfds);
 
         /*
+         * A tapdisk refused to connect a VBD until a previous ring of it has
+         * drained: nothing in XenStore will tell us when that happens, so wake
+         * up periodically to retry.
+         */
+        if (tapback_backend_connect_retry_pending(backend)) {
+            tv.tv_sec = 0;
+            tv.tv_usec = TAPBACK_CONNECT_RETRY_MS * 1000;
+            timeout = &tv;
+        }
+
+        /*
          * poll the fd for changes in the XenStore path we're interested in
          */
-        nfds = select(fd + 1, &rfds, NULL, NULL, NULL);
+        nfds = select(fd + 1, &rfds, NULL, NULL, timeout);
         if (nfds == -1) {
             if (likely(errno == EINTR))
                 continue;
@@ -464,7 +476,9 @@ tapback_backend_run(backend_t *backend)
             break;
         }
 
-        if (FD_ISSET(fd, &rfds))
+        if (nfds == 0)
+            tapback_backend_retry_connect(backend);
+        else if (FD_ISSET(fd, &rfds))
             tapback_read_watch(backend);
         DBG(NULL, "--\n");
     } while (1);

@@ -236,6 +236,16 @@ connect_tap(vbd_t * const device)
             INFO(device, "tapdisk[%d] minor=%d already connected to the "
 					"shared ring\n", device->tap->pid, device->tap->minor);
             err = 0;
+        } else if (err == EBUSY) {
+            /*
+             * A previous ring of the VBD still has requests in flight, the
+             * caller retries the connection later.
+             */
+            if (!device->connect_retry)
+                INFO(device, "tapdisk[%d] minor=%d still has requests in "
+                        "flight on a previous ring, will retry\n",
+                        device->tap->pid, device->tap->minor);
+            goto out;
         } else {
             WARN(device, "tapdisk[%d] failed to connect to the shared "
                     "ring: %s\n", device->tap->pid, strerror(err));
@@ -371,6 +381,22 @@ xenbus_connect(vbd_t *device) {
     if (err == ESRCH)
         goto out;
     /*
+     * The tapdisk refused the connection until a previous ring of the VBD
+     * has drained: tapback_backend_retry_connect() tries again later. This
+     * is not an error, the front-end just waits for the back-end.
+     */
+    if (err == EBUSY) {
+        device->connect_retry = true;
+        err = 0;
+        goto out;
+    }
+    if (device->connect_retry) {
+        device->connect_retry = false;
+        if (!err)
+            INFO(device, "tapdisk[%d] minor=%d connected to the shared ring "
+                    "after retrying\n", device->tap->pid, device->tap->minor);
+    }
+    /*
      * Even if tapdisk is already connected to the shared ring, we continue
      * connecting since we don't know how far the connection process had gone
      * before the tapback daemon was restarted.
@@ -475,6 +501,57 @@ frontend_changed(vbd_t * const device, const XenbusState state)
             break;
     }
     return err;
+}
+
+bool
+tapback_backend_connect_retry_pending(backend_t *backend)
+{
+    vbd_t *device = NULL, *next = NULL;
+
+    ASSERT(backend);
+
+    if (tapback_is_master(backend))
+        return false;
+
+    tapback_backend_for_each_device(backend, device, next) {
+        if (device->connect_retry)
+            return true;
+    }
+
+    return false;
+}
+
+void
+tapback_backend_retry_connect(backend_t *backend)
+{
+    vbd_t *device = NULL, *next = NULL;
+    int err;
+
+    ASSERT(backend);
+
+    if (tapback_is_master(backend))
+        return;
+
+    tapback_backend_for_each_device(backend, device, next) {
+        if (!device->connect_retry)
+            continue;
+
+        /*
+         * The front-end may have moved on since the tapdisk refused the
+         * connection, e.g. closed the device: then there is nothing to retry.
+         * Otherwise xenbus_connect() sets connect_retry again if the tapdisk
+         * still refuses it.
+         */
+        device->connect_retry = false;
+        if (device->frontend_state != XenbusStateInitialised &&
+                device->frontend_state != XenbusStateConnected)
+            continue;
+
+        err = frontend_changed(device, device->frontend_state);
+        if (err)
+            WARN(device, "failed to retry connecting to the front-end: %s\n",
+                    strerror(abs(err)));
+    }
 }
 
 int
