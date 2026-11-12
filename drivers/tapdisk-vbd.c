@@ -376,7 +376,7 @@ tapdisk_vbd_add_local_cache(td_vbd_t *vbd)
 	td_image_t *cache, *parent;
 	int err;
 
-	parent = tapdisk_vbd_first_image(vbd);
+	parent = tapdisk_vbd_first_non_log_image(vbd);
 	if (tapdisk_vbd_is_last_image(vbd, parent)) {
 		DPRINTF("Single-image chain, nothing to cache");
 		return 0;
@@ -442,7 +442,7 @@ tapdisk_vbd_add_secondary(td_vbd_t *vbd)
 	if (type < 0)
 		return type;
 
-	leaf = tapdisk_vbd_first_image(vbd);
+	leaf = tapdisk_vbd_first_non_log_image(vbd);
 	if (!leaf) {
 		err = -EINVAL;
 		goto fail;
@@ -1632,7 +1632,7 @@ tapdisk_vbd_complete_td_request(td_request_t treq, int res)
 	if (abs(res) == ENOSPC && td_flag_test(image->flags,
 				TD_IGNORE_ENOSPC)) {
 		res = 0;
-		leaf = tapdisk_vbd_first_image(vbd);
+		leaf = tapdisk_vbd_first_non_log_image(vbd);
 		if (vbd->secondary_mode == TD_VBD_SECONDARY_MIRROR) {
 			DPRINTF("ENOSPC: disabling mirroring\n");
 			list_del_init(&leaf->next);
