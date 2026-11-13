@@ -71,6 +71,7 @@ typedef struct tapdisk_message_minors    tapdisk_message_minors_t;
 typedef struct tapdisk_message_list      tapdisk_message_list_t;
 typedef struct tapdisk_message_stat      tapdisk_message_stat_t;
 typedef struct tapdisk_message_query     tapdisk_message_query_t;
+typedef struct tapdisk_message_commit    tapdisk_message_commit_t;
 
 struct tapdisk_message_params {
 	tapdisk_message_flag_t           flags;
@@ -81,6 +82,18 @@ struct tapdisk_message_params {
 	uint32_t                         prt_devnum;
 	uint16_t                         req_timeout;
 	char                             secondary[TAPDISK_MESSAGE_MAX_PATH_LENGTH];
+};
+
+/* Same layout as tapdisk_message_params up to path: old tap-ctl requests still work (speed 0). */
+struct tapdisk_message_commit {
+	tapdisk_message_flag_t           flags;
+
+	uint32_t                         devnum;
+	uint32_t                         domid;
+	char                             path[TAPDISK_MESSAGE_MAX_PATH_LENGTH];
+	uint64_t                         speed;    /* bytes per second, 0 for no limit */
+	uint32_t                         percent;  /* qcow2: share of the bandwidth reserved to the
+						      guest, if 0 use speed */
 };
 
 struct tapdisk_message_image {
@@ -228,6 +241,7 @@ struct tapdisk_message {
 		tapdisk_message_blkif_t    blkif;
 		tapdisk_message_resume_t   resume;
 		tapdisk_message_query_t    query;
+		tapdisk_message_commit_t   commit;
 	} u;
 };
 

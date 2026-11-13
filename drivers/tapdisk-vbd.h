@@ -230,7 +230,7 @@ int tapdisk_vbd_resume(td_vbd_t *, const char *, td_err *);
 void tapdisk_vbd_kick(td_vbd_t *, bool);
 void tapdisk_vbd_check_state(td_vbd_t *);
 void tapdisk_vbd_free(td_vbd_t *);
-int tapdisk_vbd_commit(td_vbd_t *, const char *);
+int tapdisk_vbd_commit(td_vbd_t *, const char *, uint64_t, unsigned int);
 int tapdisk_vbd_query_commit_job(td_vbd_t *, td_query_t *);
 int tapdisk_vbd_cancel_commit_job(td_vbd_t *, bool);
 

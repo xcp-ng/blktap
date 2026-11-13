@@ -32,6 +32,8 @@
 #include "config.h"
 #endif
 
+#include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1003,10 +1005,48 @@ usage:
 	return td_err_set_errno(error, EINVAL);
 }
 
+static int
+parse_speed(const char *str, uint64_t *speed)
+{
+	unsigned long long value;
+	unsigned int shift = 0;
+	char *end;
+
+	errno = 0;
+	value = strtoull(str, &end, 10);
+	if (errno || end == str)
+		return -EINVAL;
+
+	switch (*end) {
+	case 'K':
+		shift = 10;
+		break;
+	case 'M':
+		shift = 20;
+		break;
+	case 'G':
+		shift = 30;
+		break;
+	}
+	if (shift)
+		end++;
+	if (*end)
+		return -EINVAL;
+
+	/* QEMU takes an int64_t */
+	if (value > (unsigned long long)INT64_MAX >> shift)
+		return -ERANGE;
+
+	*speed = value << shift;
+	return 0;
+}
+
 static void
 tap_cli_commit_usage(FILE *stream)
 {
-	fprintf(stream, "usage: commit <-p pid> <-m minor> <-a /path/to/file>\n");
+	fprintf(stream, "usage: commit <-p pid> <-m minor> <-a /path/to/file> "
+		"[-s speed in bytes per second, with an optional K, M or G suffix | "
+		"-P percent of the estimated bandwidth reserved to the guest]\n");
 }
 
 int
@@ -1014,14 +1054,19 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 {
 	const char *args;
 	int c, pid, minor, err;
+	uint64_t speed;
+	unsigned long percent;
+	char *end;
 
 	pid   = -1;
 	minor = -1;
 	args  = NULL;
+	speed = 0;
+	percent = 0;
 	td_err_init_errno(error);
 
 	optind = 0;
-	while ((c = getopt(argc, argv, "p:m:a:h")) != -1) {
+	while ((c = getopt(argc, argv, "p:m:a:s:P:h")) != -1) {
 		switch (c) {
 		case 'p':
 			pid = atoi(optarg);
@@ -1032,6 +1077,15 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 		case 'a':
 			args = optarg;
 			break;
+		case 's':
+			if (parse_speed(optarg, &speed))
+				goto usage;
+			break;
+		case 'P':
+			percent = strtoul(optarg, &end, 10);
+			if (*end || percent < 1 || percent > 100)
+				goto usage;
+			break;
 		case '?':
 			goto usage;
 		case 'h':
@@ -1040,10 +1094,10 @@ tap_cli_commit(int argc, char **argv, td_err *error)
 		}
 	}
 
-	if (pid == -1 || minor == -1 || args == NULL)
+	if (pid == -1 || minor == -1 || args == NULL || (speed && percent))
 		goto usage;
 
-	err = tap_ctl_commit(pid, minor, args);
+	err = tap_ctl_commit(pid, minor, args, speed, percent);
 	if (!err)
 		return td_err_set_success(error);
 	return td_err_set_errno(error, err);
