@@ -215,6 +215,8 @@ int tapdisk_vbd_queue_request(td_vbd_t *, td_vbd_request_t *);
 void tapdisk_vbd_forward_request(td_request_t);
 
 int tapdisk_vbd_get_disk_info(td_vbd_t *, td_disk_info_t *);
+int tapdisk_vbd_check_disk_info_change(const td_disk_info_t *,
+						const td_disk_info_t *, td_err *);
 int tapdisk_vbd_retry_needed(td_vbd_t *);
 int tapdisk_vbd_quiesce_queue(td_vbd_t *);
 int tapdisk_vbd_start_queue(td_vbd_t *);

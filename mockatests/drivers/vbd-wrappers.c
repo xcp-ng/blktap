@@ -67,3 +67,9 @@ __wrap_tapdisk_server_register_event(char mode, int fd,
 	return 0;
 }
 
+void
+__wrap_td_forward_request(td_request_t treq)
+{
+	check_expected(treq.sec);
+	check_expected(treq.secs);
+}
