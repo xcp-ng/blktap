@@ -576,6 +576,7 @@ int
 tapdisk_vbd_open_vdi(td_vbd_t *vbd, const char *name, td_flag_t flags, int prt_devnum, td_err *error)
 {
 	char *tmp = vbd->name;
+	td_flag_t prev_flags = vbd->flags;
 	int err;
 
 	td_err_init_errno(error);
@@ -662,7 +663,8 @@ fail:
 	if (!list_empty(&vbd->images))
 		tapdisk_image_close_chain(&vbd->images);
 
-	vbd->flags = 0;
+	// Restore the previous flags rather than clearing them
+	vbd->flags = prev_flags;
 
 	return td_err_set_errno(error, err);
 }
@@ -844,6 +846,35 @@ tapdisk_vbd_drop_log(td_vbd_t *vbd)
 }
 
 int
+tapdisk_vbd_check_disk_info_change(const td_disk_info_t *cur,
+				   const td_disk_info_t *next,
+				   td_err *error)
+{
+	if (cur->sector_size != next->sector_size) {
+		EPRINTF("sector size cannot change: %ld -> %ld\n",
+			cur->sector_size, next->sector_size);
+		td_err_set_reason(error, "sector size cannot change");
+		return td_err_set_errno(error, -EMEDIUMTYPE);
+	}
+
+	if (cur->info != next->info) {
+		EPRINTF("disk info cannot change: %#x -> %#x\n",
+			cur->info, next->info);
+		td_err_set_reason(error, "disk info cannot change");
+		return td_err_set_errno(error, -EMEDIUMTYPE);
+	}
+
+	if (next->size < cur->size) {
+		EPRINTF("disk shrink not supported: %"PRIu64" -> %"PRIu64
+			" sectors\n", (uint64_t)cur->size, (uint64_t)next->size);
+		td_err_set_reason(error, "disk shrink not supported");
+		return td_err_set_errno(error, -EMEDIUMTYPE);
+	}
+
+	return 0;
+}
+
+int
 tapdisk_vbd_get_disk_info(td_vbd_t *vbd, td_disk_info_t *info)
 {
 	if (list_empty(&vbd->images))
@@ -1009,13 +1040,16 @@ tapdisk_vbd_resume(td_vbd_t *vbd, const char *name, td_err *error)
 					strerror(-err));
 			goto resume_failed;
 		}
-		if (vbd->disk_info.size != disk_info.size
-				|| vbd->disk_info.sector_size != disk_info.sector_size
-				|| vbd->disk_info.info != disk_info.info) {
+		err = tapdisk_vbd_check_disk_info_change(&vbd->disk_info,
+							 &disk_info, error);
+		if (err) {
 			EPRINTF("VBD %d cannot change disk info\n", vbd->uuid);
-			err = -EMEDIUMTYPE;
 			goto resume_failed;
 		}
+		if (disk_info.size > vbd->disk_info.size)
+			DPRINTF("disk size increased: %"PRIu64" -> %"PRIu64" sectors\n",
+				(uint64_t)vbd->disk_info.size, (uint64_t)disk_info.size);
+		vbd->disk_info = disk_info;
 	}
 resume_failed:
 	if (err) {

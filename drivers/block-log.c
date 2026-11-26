@@ -41,7 +41,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <linux/fs.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -79,33 +83,64 @@ get_bit_for_sec(td_sector_t sector)
 
 static int bitmap_init(struct tdlog_data *data, char *name)
 {
-	uint64_t bmsize;
+	uint64_t bmsize, logsize;
+	struct stat st;
+	void *bitmap;
 	int fd;
 	int result = 0;
 
 	/* Open on disk log file and map it into memory */
 	fd = open(name, O_RDWR);
 	if (fd == -1) {
-		EPRINTF("failed to open bitmap log file");
-		result = -1;
+		result = -errno;
+		EPRINTF("failed to open bitmap log file %s: %s\n",
+			name, strerror(-result));
+		return result;
 	}
 
-	if (result == 0) {
-		//data->size is in number of sectors, convert it to bytes
-		bmsize = bitmap_size(data->size * SECTOR_SIZE) + sizeof(struct cbt_log_metadata);
-		DPRINTF("CBT: allocating %"PRIu64" bytes (bitmap %"PRIu64" + header %lu) for dirty bitmap",
-								bmsize, bitmap_size(data->size * SECTOR_SIZE),
-											sizeof(struct cbt_log_metadata));
+	//data->size is in number of sectors, convert it to bytes
+	bmsize = bitmap_size(data->size * SECTOR_SIZE) + sizeof(struct cbt_log_metadata);
+	DPRINTF("CBT: allocating %"PRIu64" bytes (bitmap %"PRIu64" + header %lu) for dirty bitmap",
+							bmsize, bitmap_size(data->size * SECTOR_SIZE),
+										sizeof(struct cbt_log_metadata));
 
-		data->bitmap = mmap(NULL, bmsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-		if (!data->bitmap) {
-			EPRINTF("could not allocate dirty bitmap of size %"PRIu64, bmsize);
-			result = -1;
+	if (fstat(fd, &st) == -1) {
+		result = -errno;
+		EPRINTF("failed to stat bitmap log file %s: %s\n",
+			name, strerror(-result));
+		goto out;
+	}
+
+	// The log is a regular file on file SRs and an LV on LVM SRs
+	if (S_ISBLK(st.st_mode)) {
+		if (ioctl(fd, BLKGETSIZE64, &logsize) == -1) {
+			result = -errno;
+			EPRINTF("failed to get size of bitmap log device %s: %s\n",
+				name, strerror(-result));
+			goto out;
 		}
-
-		close (fd);
+	} else {
+		logsize = st.st_size;
 	}
 
+	if (logsize < bmsize) {
+		EPRINTF("bitmap log file %s too small for disk: %"PRIu64
+			" < %"PRIu64" bytes\n", name, logsize, bmsize);
+		result = -EINVAL;
+		goto out;
+	}
+
+	bitmap = mmap(NULL, bmsize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (bitmap == MAP_FAILED) {
+		result = -errno;
+		EPRINTF("could not map dirty bitmap of size %"PRIu64": %s\n",
+			bmsize, strerror(-result));
+		goto out;
+	}
+	data->bitmap = bitmap;
+
+out:
+	close(fd);
 	return result;
 }
 

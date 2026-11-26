@@ -718,6 +718,103 @@ out:
 }
 
 /**
+ * Live VDI resize: the toolstack writes the resize-device key after the
+ * tapdisk has been resumed with a bigger image. Query the new size and
+ * notify the front-end the same way blkback does: write the new number of
+ * sectors and rewrite the Connected state in the same transaction, so that
+ * blkfront re-reads the size.
+ *
+ * Returns 0 on success, a negative error code otherwise.
+ */
+static int
+resize_device_changed(vbd_t * const device) {
+
+    unsigned long long sectors;
+    unsigned int sector_size, info;
+    xs_transaction_t xst = XBT_NULL;
+    bool abort_transaction = false;
+    int err = 0;
+
+    ASSERT(device);
+
+    if (!device->tap) {
+        WARN(device, "resize requested but no tapdisk is attached\n");
+        return -ENODEV;
+    }
+
+    if (device->state != XenbusStateConnected) {
+        WARN(device, "resize requested while back-end is %s, ignored\n",
+                xenbus_strstate(device->state));
+        return 0;
+    }
+
+    err = tap_ctl_info(device->tap->pid, &sectors, &sector_size, &info,
+            device->minor);
+    if (err) {
+        WARN(device, "failed to get disk characteristics: %s\n",
+                strerror(-err));
+        return err;
+    }
+
+    if (sectors < device->sectors) {
+        WARN(device, "disk shrink not supported: %llu -> %llu sectors\n",
+                device->sectors, sectors);
+        return -EINVAL;
+    }
+
+    if (sectors == device->sectors) {
+        INFO(device, "resize requested but size is unchanged (%llu sectors)\n",
+                sectors);
+        return 0;
+    }
+
+    INFO(device, "resizing: %llu -> %llu sectors\n", device->sectors, sectors);
+
+    do {
+        if (!(xst = xs_transaction_start(device->backend->xs))) {
+            err = -errno;
+            WARN(device, "failed to start transaction: %s\n", strerror(-err));
+            return err;
+        }
+
+        abort_transaction = true;
+
+        err = tapback_device_printf(device, xst, "sectors", false, "%llu",
+                sectors);
+        if (err) {
+            WARN(device, "failed to write sectors: %s\n", strerror(-err));
+            break;
+        }
+
+        /* Rewriting the same state triggers the front-end watch */
+        err = tapback_device_printf(device, xst, "state", false, "%u",
+                device->state);
+        if (err) {
+            WARN(device, "failed to write state: %s\n", strerror(-err));
+            break;
+        }
+
+        abort_transaction = false;
+        if (!xs_transaction_end(device->backend->xs, xst, 0)) {
+            err = -errno;
+            ASSERT(err);
+        }
+    } while (err == -EAGAIN);
+
+    if (abort_transaction) {
+        if (!xs_transaction_end(device->backend->xs, xst, 1))
+            WARN(device, "failed to abort transaction: %s\n",
+                    strerror(errno));
+        return err;
+    }
+
+    if (!err)
+        device->sectors = sectors;
+
+    return err;
+}
+
+/**
  * Attempts to reconnected the back-end to the fornt-end if possible (e.g.
  * after a tapback restart), or after the slave tapback has started.
  *
@@ -898,12 +995,14 @@ tapback_backend_probe_device(backend_t *backend,
          */
         if (!strcmp(PHYS_DEV_KEY, comp))
             err = physical_device_changed(device);
-        if (!strcmp(PHYS_DEV_PATH_KEY, comp))
+        else if (!strcmp(PHYS_DEV_PATH_KEY, comp))
 		err = physical_device_path_changed(device);
         else if (!strcmp(FRONTEND_KEY, comp))
             err = frontend(device);
 		else if (!strcmp(HOTPLUG_STATUS_KEY, comp))
 			err = hotplug_status_changed(device);
+        else if (!strcmp(RESIZE_DEVICE_KEY, comp))
+            err = resize_device_changed(device);
         else
             DBG(device, "ignoring '%s'\n", comp);
     }

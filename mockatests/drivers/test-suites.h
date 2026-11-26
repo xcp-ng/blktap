@@ -50,11 +50,24 @@ void test_vbd_linked_list(void **state);
 void test_vbd_complete_td_request(void **state);
 void test_vbd_issue_request(void **stat);
 void test_vbd_complete_block_status_request(void **stat);
+void test_vbd_disk_info_change(void **state);
 
 static const struct CMUnitTest tapdisk_vbd_tests[] = {
 	cmocka_unit_test(test_vbd_linked_list),
 	cmocka_unit_test(test_vbd_issue_request),
-	cmocka_unit_test(test_vbd_complete_block_status_request)
+	cmocka_unit_test(test_vbd_complete_block_status_request),
+	cmocka_unit_test(test_vbd_disk_info_change)
+};
+
+int block_log_setup(void **state);
+int block_log_teardown(void **state);
+void test_block_log_live_resize(void **state);
+
+#define block_log_test(t) \
+	cmocka_unit_test_setup_teardown(t, block_log_setup, block_log_teardown)
+
+static const struct CMUnitTest tapdisk_block_log_tests[] = {
+	block_log_test(test_block_log_live_resize)
 };
 
 void test_nbdserver_new_protocol_handshake(void **state);

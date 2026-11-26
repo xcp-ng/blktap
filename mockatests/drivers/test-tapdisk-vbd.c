@@ -33,6 +33,8 @@
 #include <setjmp.h>
 #include <cmocka.h>
 #include <stdlib.h>
+#include <string.h>
+#include <errno.h>
 
 #include "test-suites.h"
 #include "tapdisk.h"
@@ -41,6 +43,11 @@
 #include "tapdisk-image.h"
 #include "tapdisk-interface.h"
 #include "tapdisk-nbdserver.h"
+#include "tapdisk-err.h"
+
+#define TEST_SECTOR_SIZE  512
+#define TEST_SIZE_1G      ((td_sector_t)(1ULL << 21))  /* 1 GiB in 512B sectors */
+#define TEST_SIZE_2T      ((td_sector_t)(1ULL << 32))  /* 2 TiB in 512B sectors */
 
 void
 test_vbd_linked_list(void **state)
@@ -154,4 +161,59 @@ test_vbd_complete_block_status_request(void **stat)
 
 	tapdisk_image_close(image);
 	free_extents(extents);
+}
+
+static td_disk_info_t
+make_disk_info(td_sector_t size, long sector_size, uint32_t info)
+{
+	td_disk_info_t di;
+
+	memset(&di, 0, sizeof(di));
+	di.size        = size;
+	di.sector_size = sector_size;
+	di.info        = info;
+
+	return di;
+}
+
+void
+test_vbd_disk_info_change(void **state)
+{
+	const struct {
+		const char     *name;
+		td_disk_info_t  next;
+		int             err;
+	} cases[] = {
+		{ "unchanged",
+		  make_disk_info(TEST_SIZE_1G, TEST_SECTOR_SIZE, 0), 0 },
+		{ "grow by one sector",
+		  make_disk_info(TEST_SIZE_1G + 1, TEST_SECTOR_SIZE, 0), 0 },
+		{ "shrink by one sector",
+		  make_disk_info(TEST_SIZE_1G - 1, TEST_SECTOR_SIZE, 0),
+		  -EMEDIUMTYPE },
+		/* A valid grow must not hide a sector size or info change */
+		{ "sector size change with grow",
+		  make_disk_info(TEST_SIZE_2T, 4096, 0), -EMEDIUMTYPE },
+		{ "info change with grow",
+		  make_disk_info(TEST_SIZE_2T, TEST_SECTOR_SIZE, VDISK_READONLY),
+		  -EMEDIUMTYPE },
+	};
+	td_disk_info_t cur = make_disk_info(TEST_SIZE_1G, TEST_SECTOR_SIZE, 0);
+	td_err error;
+	size_t i;
+	int err;
+
+	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		td_err_reset(&error);
+
+		err = tapdisk_vbd_check_disk_info_change(&cur, &cases[i].next,
+							 &error);
+
+		if (err != cases[i].err)
+			fail_msg("%s: expected %d, got %d",
+				 cases[i].name, cases[i].err, err);
+		assert_int_equal(td_err_get_errno(&error), cases[i].err);
+		if (cases[i].err)
+			assert_true(strlen(td_err_get_reason(&error)) > 0);
+	}
 }
